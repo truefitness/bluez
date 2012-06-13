@@ -1575,6 +1575,7 @@ static gboolean iter_get_basic_args(DBusMessageIter *iter,
 	return type == DBUS_TYPE_INVALID ? TRUE : FALSE;
 }
 
+#if 0 /* Disable hal */
 static void hal_battery_level_reply(DBusPendingCall *call, void *user_data)
 {
 	DBusError err;
@@ -1690,6 +1691,7 @@ static void handle_hal_property_modified(DBusMessage *msg)
 		dbus_message_iter_next(&array);
 	}
 }
+#endif /* Disable hal */
 
 static void csd_call_free(void *data)
 {
@@ -2044,9 +2046,11 @@ static gboolean signal_filter(DBusConnection *conn, DBusMessage *msg,
 	else if (dbus_message_is_signal(msg, CSD_CSNET_SIGNAL,
 				"SignalBarsChanged"))
 		handle_signal_bars_changed(msg);
+#if 0 /* Disable hal */
 	else if (dbus_message_is_signal(msg, "org.freedesktop.Hal.Device",
 					"PropertyModified"))
 		handle_hal_property_modified(msg);
+#endif
 	else if (dbus_message_is_signal(msg, SSC_DBUS_IFACE,
 						"modem_state_changed_ind"))
 		handle_modem_state(msg);
@@ -2065,6 +2069,7 @@ static void add_watch(const char *sender, const char *path,
 	watches = g_slist_prepend(watches, GUINT_TO_POINTER(watch));
 }
 
+#if 0 /* Disable hal */
 static void hal_find_device_reply(DBusPendingCall *call, void *user_data)
 {
 	DBusError err;
@@ -2115,6 +2120,8 @@ done:
 	remove_pending(call);
 }
 
+#endif /* Disable hal */
+
 int telephony_init(void)
 {
 	const char *battery_cap = "battery";
@@ -2154,6 +2161,7 @@ int telephony_init(void)
 
 	telephony_ready_ind(features, maemo_indicators, BTRH_NOT_SUPPORTED,
 								chld_str);
+#if 0 /* Disable hal */
 	if (send_method_call("org.freedesktop.Hal",
 				"/org/freedesktop/Hal/Manager",
 				"org.freedesktop.Hal.Manager",
@@ -2162,7 +2170,7 @@ int telephony_init(void)
 				DBUS_TYPE_STRING, &battery_cap,
 				DBUS_TYPE_INVALID) < 0)
 		error("Unable to send HAL method call");
-
+#endif 
 	return 0;
 }
 

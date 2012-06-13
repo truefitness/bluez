@@ -1343,6 +1343,7 @@ static gboolean handle_manager_modem_removed(DBusConnection *conn,
 	return TRUE;
 }
 
+#if 0 /* Disable hal */
 static void hal_battery_level_reply(DBusPendingCall *call, void *user_data)
 {
 	DBusMessage *reply;
@@ -1526,6 +1527,7 @@ done:
 	dbus_message_unref(reply);
 	remove_pending(call);
 }
+#endif /* Disable hal */
 
 static void handle_service_connect(DBusConnection *conn, void *user_data)
 {
@@ -1581,6 +1583,7 @@ int telephony_init(void)
 
 	watches = g_slist_prepend(watches, GUINT_TO_POINTER(watch));
 
+#if 0 /* Disable hal */
 	ret = send_method_call("org.freedesktop.Hal",
 				"/org/freedesktop/Hal/Manager",
 				"org.freedesktop.Hal.Manager",
@@ -1590,7 +1593,7 @@ int telephony_init(void)
 				DBUS_TYPE_INVALID);
 	if (ret < 0)
 		return ret;
-
+#endif
 	DBG("telephony_init() successfully");
 
 	telephony_ready_ind(features, ofono_indicators, BTRH_NOT_SUPPORTED,
