@@ -337,7 +337,7 @@ EXTRA_DIST += src/genbuiltin src/bluetooth.conf src/org.bluez.service \
 			proximity/proximity.conf
 
 if ALSA
-alsadir = $(libdir)/alsa-lib
+alsadir = $(ALSA_LIBDIR)/alsa-lib
 
 alsa_LTLIBRARIES = audio/libasound_module_pcm_bluetooth.la \
 				audio/libasound_module_ctl_bluetooth.la

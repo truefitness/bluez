@@ -119,6 +119,8 @@ AC_DEFUN([AC_PATH_ALSA], [
 	AC_CHECK_LIB(rt, clock_gettime, ALSA_LIBS="$ALSA_LIBS -lrt", alsa_found=no)
 	AC_SUBST(ALSA_CFLAGS)
 	AC_SUBST(ALSA_LIBS)
+	ALSA_LIBDIR=`$PKG_CONFIG --variable=libdir alsa 2>/dev/null`
+	AC_SUBST(ALSA_LIBDIR)
 ])
 
 AC_DEFUN([AC_PATH_USB], [
