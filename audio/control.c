@@ -50,19 +50,14 @@
 #include "device.h"
 #include "manager.h"
 #include "avctp.h"
+#include "avrcp.h"
 #include "control.h"
 #include "sdpd.h"
 #include "glib-helper.h"
 #include "dbus-common.h"
 
 static unsigned int avctp_id = 0;
-
-struct control {
-	struct audio_device *dev;
-	struct avctp *session;
-
-	gboolean target;
-};
+static unsigned int avrcp_id = 0;
 
 static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 				avctp_state_t new_state, void *user_data)
@@ -94,6 +89,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 
 		break;
 	case AVCTP_STATE_CONNECTED:
+		avrcp_get_capabilities(control);
 		value = TRUE;
 		g_dbus_emit_signal(dev->conn, dev->path,
 				AUDIO_CONTROL_INTERFACE, "Connected",
@@ -105,6 +101,33 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 	default:
 		return;
 	}
+}
+
+static void media_status_changed(struct audio_device *dev, 
+		void *user_data)
+{
+	struct control *con = user_data;
+	gboolean value = TRUE;
+	dbus_uint32_t serial = 0;
+	DBusMessage *msg;
+	DBusMessageIter args;
+	
+	char * array[7];	
+	char ** test = &array[0];
+	
+	array[0] = g_hash_table_lookup(con->metadata,"Title");
+	array[1] = g_hash_table_lookup(con->metadata,"Artist");
+	array[2] = g_hash_table_lookup(con->metadata,"Album");
+	array[3] = g_hash_table_lookup(con->metadata,"TrackNumber");
+	array[4] = g_hash_table_lookup(con->metadata,"NumberOfTracks");
+	array[5] = g_hash_table_lookup(con->metadata,"Genre");
+	array[6] = g_hash_table_lookup(con->metadata,"Duration");
+		
+	DBG("callback is called for %s",batostr(&dev->src));
+	DBG("%s",array[0]);
+	emit_array_property_changed(dev->conn, dev->path, AUDIO_CONTROL_INTERFACE,
+					"Metadata", DBUS_TYPE_STRING, &test, 7);
+					
 }
 
 static DBusMessage *control_is_connected(DBusConnection *conn,
@@ -293,11 +316,14 @@ struct control *control_init(struct audio_device *dev, uint16_t uuid16)
 
 	control = g_new0(struct control, 1);
 	control->dev = dev;
+	control->metadata = g_hash_table_new(g_str_hash, g_str_equal);
 
 	control_update(control, uuid16);
 
 	if (!avctp_id)
 		avctp_id = avctp_add_state_cb(state_changed, NULL);
+	if (!avrcp_id)
+		avrcp_id = avrcp_add_state_cb(media_status_changed, NULL);
 
 	return control;
 }

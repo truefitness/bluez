@@ -412,23 +412,30 @@ static void handle_response(struct avctp *session, struct avctp_header *avctp,
 				size_t operand_count)
 {
 	GSList *l;
-
+	/* 
+	 * Ignore passthrough command rsponses because it messes up
+	 * the transaction id numbering
+	 */
+	if(avc->code == 0x09 && avc->opcode == 0x7C){
+		return;
+	}
+	
 	for (l = session->handlers; l; l = l->next) {
 		struct avctp_rsp_handler *handler = l->data;
-
+		
 		if (handler->id != avctp->transaction)
 			continue;
 
 		if (handler->func && handler->func(session, avc->code,
-						avc->subunit_type,
-						operands, operand_count,
-						handler->user_data))
-			return;
-
+					avc->subunit_type,
+					operands, operand_count,
+					handler->user_data))
+				return;
+				
 		session->handlers = g_slist_remove(session->handlers, handler);
 		g_free(handler);
-
-		return;
+			
+		return;			
 	}
 }
 
@@ -900,7 +907,7 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
 
 	memset(buf, 0, sizeof(buf));
 
-	avctp->transaction = id++;
+	avctp->transaction = id;
 	avctp->packet_type = AVCTP_PACKET_SINGLE;
 	avctp->cr = AVCTP_COMMAND;
 	avctp->pid = htons(AV_REMOTE_SVCLASS_ID);
@@ -916,14 +923,21 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
 
 	if (write(sk, buf, sizeof(buf)) < 0)
 		return -errno;
-
+	DBG("Passthru Press send with id: %d", id);
+	id++;
+	id %= 16;
+	
 	/* Button release */
-	avctp->transaction = id++;
+	avctp->transaction = id;
+	
 	operands[0] |= 0x80;
 
 	if (write(sk, buf, sizeof(buf)) < 0)
 		return -errno;
-
+	DBG("Passthru Release send with id: %d", id);
+	id++;
+	id %= 16;
+	
 	return 0;
 }
 
@@ -964,6 +978,7 @@ static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
 		err = -errno;
 
 	g_free(buf);
+	DBG("Vendor send with id: %d", transaction);
 	return err;
 }
 
@@ -985,8 +1000,10 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 
 	err = avctp_send(session, id, AVCTP_COMMAND, code, subunit,
 				AVC_OP_VENDORDEP, operands, operand_count);
-	if (err < 0)
+	if (err < 0){
+		DBG("Vendor send error: %d",err);
 		return err;
+	}
 
 	handler = g_new0(struct avctp_rsp_handler, 1);
 	handler->id = id;
@@ -994,9 +1011,11 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 	handler->user_data = user_data;
 
 	session->handlers = g_slist_prepend(session->handlers, handler);
-
+	
 	id++;
+	id %= 16; //transaction id is only 4 bits
 
+	
 	return 0;
 }
 
@@ -1075,6 +1094,7 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
 	GError *err = NULL;
 	GIOChannel *io;
 
+	DBG("src: %s, dst: %s", batostr(src),batostr(dst));
 	session = avctp_get_internal(src, dst);
 	if (!session)
 		return NULL;

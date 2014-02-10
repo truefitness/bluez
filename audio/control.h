@@ -24,6 +24,13 @@
 
 #define AUDIO_CONTROL_INTERFACE "org.bluez.Control"
 
+struct control {
+	struct audio_device *dev;
+	struct avctp        *session;
+	GHashTable          *metadata;
+	gboolean target;
+};
+
 struct control *control_init(struct audio_device *dev, uint16_t uuid16);
 void control_update(struct control *control, uint16_t uuid16);
 void control_unregister(struct audio_device *dev);

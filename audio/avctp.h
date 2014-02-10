@@ -23,6 +23,7 @@
  */
 
 #define AVCTP_PSM 23
+#define AVCTP_BROWSING_PSM		27
 
 #define AVC_MTU 512
 #define AVC_HEADER_LENGTH 3

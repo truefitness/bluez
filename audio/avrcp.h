@@ -69,12 +69,16 @@
 #define AVRCP_PLAY_STATUS_ERROR		0xFF
 
 /* Notification events */
-#define AVRCP_EVENT_STATUS_CHANGED	0x01
-#define AVRCP_EVENT_TRACK_CHANGED	0x02
-#define AVRCP_EVENT_TRACK_REACHED_END	0x03
-#define AVRCP_EVENT_TRACK_REACHED_START	0x04
-#define AVRCP_EVENT_VOLUME_CHANGED	0x0d
-#define AVRCP_EVENT_LAST		AVRCP_EVENT_VOLUME_CHANGED
+#define AVRCP_EVENT_STATUS_CHANGED		0x01
+#define AVRCP_EVENT_TRACK_CHANGED		0x02
+#define AVRCP_EVENT_TRACK_REACHED_END		0x03
+#define AVRCP_EVENT_TRACK_REACHED_START		0x04
+#define AVRCP_EVENT_SETTINGS_CHANGED		0x08
+#define AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED	0x0a
+#define AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED	0x0b
+#define AVRCP_EVENT_UIDS_CHANGED		0x0c
+#define AVRCP_EVENT_VOLUME_CHANGED		0x0d
+#define AVRCP_EVENT_LAST			AVRCP_EVENT_VOLUME_CHANGED
 
 struct avrcp_player_cb {
 	int (*get_setting) (uint8_t attr, void *user_data);
@@ -88,12 +92,22 @@ struct avrcp_player_cb {
 							void *user_data);
 };
 
+typedef void (*avrcp_state_cb) (struct audio_device *dev,
+				//avrcp_state_t old_state,
+				//avrcp_state_t new_state,
+				void *user_data);
+				
+unsigned int avrcp_add_state_cb(avrcp_state_cb cb, void *user_data);
+gboolean avrcp_remove_state_cb(unsigned int id);
+
 int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config);
 void avrcp_unregister(const bdaddr_t *src);
 
 gboolean avrcp_connect(struct audio_device *dev);
 void avrcp_disconnect(struct audio_device *dev);
 int avrcp_set_volume(struct audio_device *dev, uint8_t volume);
+
+void avrcp_get_capabilities(struct control *con);
 
 struct avrcp_player *avrcp_register_player(const bdaddr_t *src,
 						struct avrcp_player_cb *cb,
