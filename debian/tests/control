@@ -1,0 +1,3 @@
+Tests: bluez_response
+Depends: python3-aptdaemon.test, python, python3, python-gi, python3-gi, python-dbus, python3-dbus, gir1.2-glib-2.0, bluez
+Restrictions: needs-root

@@ -1,0 +1,2 @@
+usr/lib/*/alsa-lib/*.so
+audio/bluetooth.conf usr/share/alsa/alsa.conf.d

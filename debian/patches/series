@@ -1,0 +1,19 @@
+01_lower_sink_ranking.patch
+02_disable_hal.patch
+03-Fix-return-code-of-hid2hci.patch
+06-alsalib.patch
+#07-fix-639356.patch
+# 08-0001-systemd-install-systemd-unit-files.patch
+enable_audio_profiles.patch
+09_fix_ftbfs_with_c99.patch
+sbc_mmx.patch
+dinovo_edge_keyboard.patch
+git-57170b3-fix_network_connect_method.patch
+git-2f92669-permit_concurrent_ag_hf.patch
+git-a66a557-gdbus_missing_flags.patch
+git-b57c64f-network-null-deref.patch
+git-ea793cb-input_io_channel_watches.patch
+True-volume-control-3859147d82.diff
+True-Updated-control-api.txt-file.patch
+True-Bluetooth-metadata
+True-Remove-remote-version-call.patch

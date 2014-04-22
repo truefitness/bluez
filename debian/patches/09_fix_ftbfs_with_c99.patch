@@ -1,0 +1,27 @@
+http://permalink.gmane.org/gmane.linux.bluez.kernel/22306
+
+Index: ubuntu/lib/bluetooth.h
+===================================================================
+--- ubuntu.orig/lib/bluetooth.h	2012-05-01 15:49:22.741014152 +0100
++++ ubuntu/lib/bluetooth.h	2012-05-01 15:49:54.553012753 +0100
+@@ -140,16 +140,16 @@
+ #define bt_get_unaligned(ptr)			\
+ ({						\
+ 	struct __attribute__((packed)) {	\
+-		typeof(*(ptr)) __v;		\
+-	} *__p = (typeof(__p)) (ptr);		\
++		__typeof__(*(ptr)) __v;		\
++	} *__p = (__typeof__(__p)) (ptr);	\
+ 	__p->__v;				\
+ })
+ 
+ #define bt_put_unaligned(val, ptr)		\
+ do {						\
+ 	struct __attribute__((packed)) {	\
+-		typeof(*(ptr)) __v;		\
+-	} *__p = (typeof(__p)) (ptr);		\
++		__typeof__(*(ptr)) __v;		\
++	} *__p = (__typeof__(__p)) (ptr);	\
+ 	__p->__v = (val);			\
+ } while(0)
+ 

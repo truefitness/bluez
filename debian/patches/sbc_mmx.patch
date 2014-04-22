@@ -1,0 +1,21 @@
+From: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
+Subject: Fix FTBFS is parsing inline assembly for calculating MMX scalefactors
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/bluez/+bug/911871
+
+Without this patch, bluez fails to compile when building using GCC 4.7; for
+test-rebuild-20111222.
+See also https://launchpadlibrarian.net/88149127/buildlog_ubuntu-precise-i386.bluez_4.96-3ubuntu4_FAILEDTOBUILD.txt.gz
+
+Index: ubuntu/sbc/sbc_primitives_mmx.c
+===================================================================
+--- ubuntu.orig/sbc/sbc_primitives_mmx.c	2012-05-01 15:49:22.677014156 +0100
++++ ubuntu/sbc/sbc_primitives_mmx.c	2012-05-01 15:49:54.777012742 +0100
+@@ -318,7 +318,7 @@
+ 				"movl          %k0, 4(%3)\n"
+ 			: "+r" (blk)
+ 			: "r" (&sb_sample_f[0][ch][sb]),
+-				"i" ((char *) &sb_sample_f[1][0][0] -
++				"r" ((char *) &sb_sample_f[1][0][0] -
+ 					(char *) &sb_sample_f[0][0][0]),
+ 				"r" (&scale_factor[ch][sb]),
+ 				"r" (&consts),

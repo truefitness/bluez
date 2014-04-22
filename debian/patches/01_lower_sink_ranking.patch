@@ -1,0 +1,17 @@
+Description: a2dpsink should have a rank < GST_RANK_MARGINAL
+Author: Sebastian Dröge <slomo@circular-chaos.org>
+Origin: Sebastian Dröge <slomo@circular-chaos.org>
+Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
+Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=571595
+
+Index: bluez-4.101/audio/gsta2dpsink.c
+===================================================================
+--- bluez-4.101.orig/audio/gsta2dpsink.c	2012-06-14 03:04:20.000000000 +1200
++++ bluez-4.101/audio/gsta2dpsink.c	2012-07-04 13:31:44.272091868 +1200
+@@ -725,5 +725,5 @@
+ gboolean gst_a2dp_sink_plugin_init(GstPlugin *plugin)
+ {
+ 	return gst_element_register(plugin, "a2dpsink",
+-			GST_RANK_MARGINAL, GST_TYPE_A2DP_SINK);
++			GST_RANK_MARGINAL-1, GST_TYPE_A2DP_SINK);
+ }
