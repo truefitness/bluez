@@ -1,3 +1,9 @@
+bluez (4.101-0ubuntu8b1true8) UNRELEASED; urgency=low
+
+  * Initial check-in of git-buildpackage related helper files.
+
+ -- Robert Hedges <rhedges@truefitness.com>  Wed, 28 May 2014 14:23:34 -0500
+
 bluez (4.101-0ubuntu8b1true1ubuntu7) precise; urgency=low
 
   * Add True-Remove-remote-version-call
