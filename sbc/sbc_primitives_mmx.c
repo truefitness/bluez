@@ -318,7 +318,7 @@ static void sbc_calc_scalefactors_mmx(
 				"movl          %k0, 4(%3)\n"
 			: "+r" (blk)
 			: "r" (&sb_sample_f[0][ch][sb]),
-				"i" ((char *) &sb_sample_f[1][0][0] -
+				"r" ((char *) &sb_sample_f[1][0][0] -
 					(char *) &sb_sample_f[0][0][0]),
 				"r" (&scale_factor[ch][sb]),
 				"r" (&consts),
