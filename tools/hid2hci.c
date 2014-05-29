@@ -240,7 +240,7 @@ int main(int argc, char *argv[])
 	enum mode mode = HCI;
 	const char *devpath = NULL;
 	int err = -1;
-	int rc = 1;
+	int rc = 0;
 
 	for (;;) {
 		int option;
@@ -288,13 +288,16 @@ int main(int argc, char *argv[])
 	}
 
 	udev = udev_new();
-	if (udev == NULL)
+	if (udev == NULL) {
+		rc = errno;
 		goto exit;
+	}
 
 	snprintf(syspath, sizeof(syspath), "/sys/%s", devpath);
 	udev_dev = udev_device_new_from_syspath(udev, syspath);
 	if (udev_dev == NULL) {
 		fprintf(stderr, "error: could not find '%s'\n", devpath);
+		rc = errno;
 		goto exit;
 	}
 
@@ -312,6 +315,7 @@ int main(int argc, char *argv[])
 			dev = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device");
 			if (dev == NULL) {
 				fprintf(stderr, "error: could not find usb_device for '%s'\n", devpath);
+				rc = errno;
 				goto exit;
 			}
 		}
@@ -320,6 +324,7 @@ int main(int argc, char *argv[])
 		if (handle == NULL) {
 			fprintf(stderr, "error: unable to handle '%s'\n",
 				udev_device_get_syspath(dev));
+			rc = errno;
 			goto exit;
 		}
 		err = usb_switch(handle, mode);
@@ -331,6 +336,7 @@ int main(int argc, char *argv[])
 		device = udev_device_get_devnode(udev_dev);
 		if (device == NULL) {
 			fprintf(stderr, "error: could not find hiddev device node\n");
+			rc = errno;
 			goto exit;
 		}
 		err = hid_switch_logitech(device);
