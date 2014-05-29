@@ -1,6 +1,4 @@
-bluez (4.101-0ubuntu8b1true8~1.gbp562562) UNRELEASED; urgency=low
-
-  ** SNAPSHOT build @562562acbde495071cfcc289bb2fc23f8df2e935 **
+bluez (4.101-0ubuntu8b1true8) precise; urgency=low
 
   [ Robert Hedges ]
   * Initial check-in of git-buildpackage related helper files.
@@ -8,9 +6,7 @@ bluez (4.101-0ubuntu8b1true8~1.gbp562562) UNRELEASED; urgency=low
   * Added first draft of packaging instructions.
   * Reformatted patches to be gpb-pq compatible.
 
-  [ Robert ]
-
- -- Robert <rhedges@veracityBuild2>  Thu, 29 May 2014 16:43:22 -0500
+ -- Robert <rhedges@truefitness.com>  Thu, 29 May 2014 17:01:02 -0500
 
 bluez (4.101-0ubuntu8b1true1ubuntu7) precise; urgency=low
 
@@ -22,7 +18,7 @@ bluez (4.101-0ubuntu8b1true1ubuntu5) precise; urgency=low
 
   * Add True-Bluetooth-metadata
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:13:30 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:13:30 -0600
 
 bluez (4.101-0ubuntu8b1true1ubuntu4) precise; urgency=low
 
@@ -30,31 +26,31 @@ bluez (4.101-0ubuntu8b1true1ubuntu4) precise; urgency=low
     Added a new property changed signal named "Metadata" which will
     send the current playing track metadata as a string array. 
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:12:41 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:12:41 -0600
 
 bluez (4.101-0ubuntu8b1true1ubuntu3) precise; urgency=low
 
   * Add True-Updated-control-api.txt-file.patch
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:08:52 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:08:52 -0600
 
 bluez (4.101-0ubuntu8b1true1ubuntu2) precise; urgency=low
 
   * Updated api docs for volume control. 
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:08:01 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:08:01 -0600
 
 bluez (4.101-0ubuntu8b1true1ubuntu1) precise; urgency=low
 
   * Add True-volume-control-3859147d82.diff
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:05:14 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:05:14 -0600
 
 bluez (4.101-0ubuntu8b1true1) precise; urgency=low
 
   * Adding volume controls to audio 
 
- -- Robert <rhedges@veracityBuild2>  Mon, 10 Feb 2014 13:04:21 -0600
+ -- Robert <rhedges@truefitness.com>  Mon, 10 Feb 2014 13:04:21 -0600
 
 bluez (4.101-0ubuntu8b1) raring; urgency=low
 
