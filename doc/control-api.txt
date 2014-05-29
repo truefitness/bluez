@@ -29,6 +29,30 @@ Methods		boolean IsConnected() {deprecated}
 
 			Adjust remote volume one step down
 
+		void Play()
+			
+			Play track
+
+		void Stop()
+
+			Stop track
+
+		void Pause()
+		
+			Pause track
+
+		void Forward()
+
+			Next track
+
+		void Backward()
+
+			Previous track
+
+		void Mute()
+	
+			Mute volume
+
 Signals		Connected() {deprecated}
 
 			Sent when a successful AVRCP connection has been made
