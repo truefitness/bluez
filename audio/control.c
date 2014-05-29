@@ -128,8 +128,8 @@ static DBusMessage *control_is_connected(DBusConnection *conn,
 	return reply;
 }
 
-static DBusMessage *volume_up(DBusConnection *conn, DBusMessage *msg,
-								void *data)
+static DBusMessage *internal_send_passthrough(DBusConnection *conn, 
+					DBusMessage *msg, void *data, uint8_t op)
 {
 	struct audio_device *device = data;
 	struct control *control = device->control;
@@ -141,31 +141,59 @@ static DBusMessage *volume_up(DBusConnection *conn, DBusMessage *msg,
 	if (!control->target)
 		return btd_error_not_supported(msg);
 
-	err = avctp_send_passthrough(control->session, VOL_UP_OP);
+	err = avctp_send_passthrough(control->session, op);
 	if (err < 0)
 		return btd_error_failed(msg, strerror(-err));
 
 	return dbus_message_new_method_return(msg);
 }
 
+static DBusMessage *volume_up(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, VOL_UP_OP);
+}
+
 static DBusMessage *volume_down(DBusConnection *conn, DBusMessage *msg,
 								void *data)
 {
-	struct audio_device *device = data;
-	struct control *control = device->control;
-	int err;
+	return internal_send_passthrough(conn, msg, data, VOL_DOWN_OP);
+}
 
-	if (!control->session)
-		return btd_error_not_connected(msg);
+static DBusMessage *control_play(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, PLAY_OP);
+}
 
-	if (!control->target)
-		return btd_error_not_supported(msg);
+static DBusMessage *control_pause(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, PAUSE_OP);
+}
 
-	err = avctp_send_passthrough(control->session, VOL_DOWN_OP);
-	if (err < 0)
-		return btd_error_failed(msg, strerror(-err));
+static DBusMessage *control_stop(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, STAVC_OP_OP);
+}
 
-	return dbus_message_new_method_return(msg);
+static DBusMessage *control_forward(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, FORWARD_OP);
+}
+
+static DBusMessage *control_backward(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, BACKWARD_OP);
+}
+
+static DBusMessage *control_mute(DBusConnection *conn, DBusMessage *msg,
+								void *data)
+{
+	return internal_send_passthrough(conn, msg, data, MUTE_OP);
 }
 
 static DBusMessage *control_get_properties(DBusConnection *conn,
@@ -206,6 +234,12 @@ static const GDBusMethodTable control_methods[] = {
 				control_get_properties) },
 	{ GDBUS_METHOD("VolumeUp", NULL, NULL, volume_up) },
 	{ GDBUS_METHOD("VolumeDown", NULL, NULL, volume_down) },
+	{ GDBUS_METHOD("Play", NULL, NULL, control_play) },
+	{ GDBUS_METHOD("Stop", NULL, NULL, control_stop) },
+	{ GDBUS_METHOD("Pause", NULL, NULL, control_pause) },
+	{ GDBUS_METHOD("Forward", NULL, NULL, control_forward) },
+	{ GDBUS_METHOD("Backward", NULL, NULL, control_backward) },	
+	{ GDBUS_METHOD("Mute", NULL, NULL, control_mute) },
 	{ }
 };
 
