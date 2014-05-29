@@ -1,0 +1,184 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Thu, 14 Jun 2012 03:04:20 +1200
+Subject: Disable usage of Hal in the telephony plugins, and disable the hal
+ plugin. They do not do very useful things anyway, and just cause
+ hal to start up, which is expensive.
+
+Updated by Michael Biebl <biebl@debian.org>
+Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
+Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=599023
+---
+ audio/telephony-maemo5.c |    9 ++++++++-
+ audio/telephony-maemo6.c |   10 +++++++++-
+ audio/telephony-ofono.c  |    5 ++++-
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/audio/telephony-maemo5.c b/audio/telephony-maemo5.c
+index 8a00296..3db8bb7 100644
+--- a/audio/telephony-maemo5.c
++++ b/audio/telephony-maemo5.c
+@@ -1385,6 +1385,7 @@ static gboolean iter_get_basic_args(DBusMessageIter *iter,
+ 	return type == DBUS_TYPE_INVALID ? TRUE : FALSE;
+ }
+ 
++#if 0 /* Disable hal */
+ static void hal_battery_level_reply(DBusPendingCall *call, void *user_data)
+ {
+ 	DBusError err;
+@@ -1501,6 +1502,7 @@ static void handle_hal_property_modified(DBusMessage *msg)
+ 		dbus_message_iter_next(&array);
+ 	}
+ }
++#endif /* Disable hal */
+ 
+ static void csd_call_free(struct csd_call *call)
+ {
+@@ -1715,6 +1717,7 @@ done:
+ 	dbus_message_unref(reply);
+ }
+ 
++#if 0 /* Disable hal */
+ static void hal_find_device_reply(DBusPendingCall *call, void *user_data)
+ {
+ 	DBusError err;
+@@ -1768,6 +1771,7 @@ static void hal_find_device_reply(DBusPendingCall *call, void *user_data)
+ done:
+ 	dbus_message_unref(reply);
+ }
++#endif /* Disable hal */
+ 
+ static void phonebook_read_reply(DBusPendingCall *call, void *user_data)
+ {
+@@ -2019,9 +2023,11 @@ static DBusHandlerResult signal_filter(DBusConnection *conn,
+ 	else if (dbus_message_is_signal(msg, NETWORK_INTERFACE,
+ 					"signal_strength_change"))
+ 		handle_signal_strength_change(msg);
++#if 0 /* Disable hal */
+ 	else if (dbus_message_is_signal(msg, "org.freedesktop.Hal.Device",
+ 					"PropertyModified"))
+ 		handle_hal_property_modified(msg);
++#endif /* Disable hal */
+ 	else if (dbus_message_is_signal(msg, SSC_DBUS_IFACE,
+ 						"modem_state_changed_ind"))
+ 		handle_modem_state(msg);
+@@ -2078,6 +2084,7 @@ int telephony_init(void)
+ 
+ 	telephony_ready_ind(features, maemo_indicators, BTRH_NOT_SUPPORTED,
+ 								chld_str);
++#if 0 /* Disable hal */
+ 	if (send_method_call("org.freedesktop.Hal",
+ 				"/org/freedesktop/Hal/Manager",
+ 				"org.freedesktop.Hal.Manager",
+@@ -2086,7 +2093,7 @@ int telephony_init(void)
+ 				DBUS_TYPE_STRING, &battery_cap,
+ 				DBUS_TYPE_INVALID) < 0)
+ 		error("Unable to send HAL method call");
+-
++#endif /* Disable hal */
+ 	return 0;
+ }
+ 
+diff --git a/audio/telephony-maemo6.c b/audio/telephony-maemo6.c
+index 0727ffe..d71d8c1 100644
+--- a/audio/telephony-maemo6.c
++++ b/audio/telephony-maemo6.c
+@@ -1575,6 +1575,7 @@ static gboolean iter_get_basic_args(DBusMessageIter *iter,
+ 	return type == DBUS_TYPE_INVALID ? TRUE : FALSE;
+ }
+ 
++#if 0 /* Disable hal */
+ static void hal_battery_level_reply(DBusPendingCall *call, void *user_data)
+ {
+ 	DBusError err;
+@@ -1690,6 +1691,7 @@ static void handle_hal_property_modified(DBusMessage *msg)
+ 		dbus_message_iter_next(&array);
+ 	}
+ }
++#endif /* Disable hal */
+ 
+ static void csd_call_free(void *data)
+ {
+@@ -2044,9 +2046,11 @@ static gboolean signal_filter(DBusConnection *conn, DBusMessage *msg,
+ 	else if (dbus_message_is_signal(msg, CSD_CSNET_SIGNAL,
+ 				"SignalBarsChanged"))
+ 		handle_signal_bars_changed(msg);
++#if 0 /* Disable hal */
+ 	else if (dbus_message_is_signal(msg, "org.freedesktop.Hal.Device",
+ 					"PropertyModified"))
+ 		handle_hal_property_modified(msg);
++#endif
+ 	else if (dbus_message_is_signal(msg, SSC_DBUS_IFACE,
+ 						"modem_state_changed_ind"))
+ 		handle_modem_state(msg);
+@@ -2065,6 +2069,7 @@ static void add_watch(const char *sender, const char *path,
+ 	watches = g_slist_prepend(watches, GUINT_TO_POINTER(watch));
+ }
+ 
++#if 0 /* Disable hal */
+ static void hal_find_device_reply(DBusPendingCall *call, void *user_data)
+ {
+ 	DBusError err;
+@@ -2115,6 +2120,8 @@ done:
+ 	remove_pending(call);
+ }
+ 
++#endif /* Disable hal */
++
+ int telephony_init(void)
+ {
+ 	const char *battery_cap = "battery";
+@@ -2154,6 +2161,7 @@ int telephony_init(void)
+ 
+ 	telephony_ready_ind(features, maemo_indicators, BTRH_NOT_SUPPORTED,
+ 								chld_str);
++#if 0 /* Disable hal */
+ 	if (send_method_call("org.freedesktop.Hal",
+ 				"/org/freedesktop/Hal/Manager",
+ 				"org.freedesktop.Hal.Manager",
+@@ -2162,7 +2170,7 @@ int telephony_init(void)
+ 				DBUS_TYPE_STRING, &battery_cap,
+ 				DBUS_TYPE_INVALID) < 0)
+ 		error("Unable to send HAL method call");
+-
++#endif 
+ 	return 0;
+ }
+ 
+diff --git a/audio/telephony-ofono.c b/audio/telephony-ofono.c
+index 961fedd..5ed7400 100644
+--- a/audio/telephony-ofono.c
++++ b/audio/telephony-ofono.c
+@@ -1343,6 +1343,7 @@ static gboolean handle_manager_modem_removed(DBusConnection *conn,
+ 	return TRUE;
+ }
+ 
++#if 0 /* Disable hal */
+ static void hal_battery_level_reply(DBusPendingCall *call, void *user_data)
+ {
+ 	DBusMessage *reply;
+@@ -1526,6 +1527,7 @@ done:
+ 	dbus_message_unref(reply);
+ 	remove_pending(call);
+ }
++#endif /* Disable hal */
+ 
+ static void handle_service_connect(DBusConnection *conn, void *user_data)
+ {
+@@ -1581,6 +1583,7 @@ int telephony_init(void)
+ 
+ 	watches = g_slist_prepend(watches, GUINT_TO_POINTER(watch));
+ 
++#if 0 /* Disable hal */
+ 	ret = send_method_call("org.freedesktop.Hal",
+ 				"/org/freedesktop/Hal/Manager",
+ 				"org.freedesktop.Hal.Manager",
+@@ -1590,7 +1593,7 @@ int telephony_init(void)
+ 				DBUS_TYPE_INVALID);
+ 	if (ret < 0)
+ 		return ret;
+-
++#endif
+ 	DBG("telephony_init() successfully");
+ 
+ 	telephony_ready_ind(features, ofono_indicators, BTRH_NOT_SUPPORTED,
+-- 

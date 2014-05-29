@@ -1,0 +1,44 @@
+From: Nathaniel Cabalos <ncabalos@truefitness.com>
+Date: Thu, 29 May 2014 13:35:57 -0500
+Subject: True-Updated-control-api.txt-file.patch
+
+---
+ doc/control-api.txt |   24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/doc/control-api.txt b/doc/control-api.txt
+index eacfbcd..5a2c62e 100644
+--- a/doc/control-api.txt
++++ b/doc/control-api.txt
+@@ -29,6 +29,30 @@ Methods		boolean IsConnected() {deprecated}
+ 
+ 			Adjust remote volume one step down
+ 
++		void Play()
++			
++			Play track
++
++		void Stop()
++
++			Stop track
++
++		void Pause()
++		
++			Pause track
++
++		void Forward()
++
++			Next track
++
++		void Backward()
++
++			Previous track
++
++		void Mute()
++	
++			Mute volume
++
+ Signals		Connected() {deprecated}
+ 
+ 			Sent when a successful AVRCP connection has been made
+-- 

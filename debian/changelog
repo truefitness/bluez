@@ -1,8 +1,16 @@
-bluez (4.101-0ubuntu8b1true8) UNRELEASED; urgency=low
+bluez (4.101-0ubuntu8b1true8~1.gbp562562) UNRELEASED; urgency=low
 
+  ** SNAPSHOT build @562562acbde495071cfcc289bb2fc23f8df2e935 **
+
+  [ Robert Hedges ]
   * Initial check-in of git-buildpackage related helper files.
+  * clever
+  * Added first draft of packaging instructions.
+  * Reformatted patches to be gpb-pq compatible.
 
- -- Robert Hedges <rhedges@truefitness.com>  Wed, 28 May 2014 14:23:34 -0500
+  [ Robert ]
+
+ -- Robert <rhedges@veracityBuild2>  Thu, 29 May 2014 16:43:22 -0500
 
 bluez (4.101-0ubuntu8b1true1ubuntu7) precise; urgency=low
 

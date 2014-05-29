@@ -1,0 +1,22 @@
+From: =?UTF-8?q?Sebastian=20Dr=C3=B6ge?= <slomo@circular-chaos.org>
+Date: Thu, 14 Jun 2012 03:04:20 +1200
+Subject: 0001-lower_sink_ranking.patch
+
+Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
+Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=571595
+---
+ audio/gsta2dpsink.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/audio/gsta2dpsink.c b/audio/gsta2dpsink.c
+index c8f6346..7f6d0c0 100644
+--- a/audio/gsta2dpsink.c
++++ b/audio/gsta2dpsink.c
+@@ -725,5 +725,5 @@ static void gst_a2dp_sink_init(GstA2dpSink *self,
+ gboolean gst_a2dp_sink_plugin_init(GstPlugin *plugin)
+ {
+ 	return gst_element_register(plugin, "a2dpsink",
+-			GST_RANK_MARGINAL, GST_TYPE_A2DP_SINK);
++			GST_RANK_MARGINAL-1, GST_TYPE_A2DP_SINK);
+ }
+-- 

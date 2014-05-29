@@ -1,0 +1,49 @@
+From: Nathaniel Cabalos <ncabalos@truefitness.com>
+Date: Sat, 26 Apr 2014 13:35:57 -0500
+Subject: True-Remove-remote-version-call.patch
+
+---
+ plugins/hciops.c |    8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/plugins/hciops.c b/plugins/hciops.c
+index d74f2ea..4bc95a8 100644
+--- a/plugins/hciops.c
++++ b/plugins/hciops.c
+@@ -2287,7 +2287,7 @@ static inline void conn_complete(int index, void *ptr)
+ 		bonding_complete(dev, conn, 0);
+ 
+ 	/* check if the remote version needs be requested */
+-	ba2str(&dev->bdaddr, local_addr);
++	/*ba2str(&dev->bdaddr, local_addr);
+ 	ba2str(&evt->bdaddr, peer_addr);
+ 
+ 	create_name(filename, sizeof(filename), STORAGEDIR, local_addr,
+@@ -2297,7 +2297,7 @@ static inline void conn_complete(int index, void *ptr)
+ 	if (!str)
+ 		get_remote_version(index, btohs(evt->handle));
+ 	else
+-		free(str);
++		free(str);*/
+ }
+ 
+ static inline uint8_t le_addr_type(uint8_t bdaddr_type)
+@@ -2334,7 +2334,7 @@ static inline void le_conn_complete(int index, void *ptr)
+ 								NULL, NULL);
+ 
+ 	/* check if the remote version needs be requested */
+-	ba2str(&dev->bdaddr, local_addr);
++	/*ba2str(&dev->bdaddr, local_addr);
+ 	ba2str(&evt->peer_bdaddr, peer_addr);
+ 
+ 	create_name(filename, sizeof(filename), STORAGEDIR, local_addr,
+@@ -2344,7 +2344,7 @@ static inline void le_conn_complete(int index, void *ptr)
+ 	if (!str)
+ 		get_remote_version(index, btohs(evt->handle));
+ 	else
+-		free(str);
++		free(str);*/
+ }
+ 
+ static inline void disconn_complete(int index, void *ptr)
+-- 

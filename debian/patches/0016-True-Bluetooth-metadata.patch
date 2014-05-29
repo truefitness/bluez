@@ -1,0 +1,917 @@
+From: Nathaniel Cabalos <ncabalos@truefitness.com>
+Date: Mon, 10 Feb 2014 13:35:57 -0500
+Subject: True-Bluetooth-metadata
+
+---
+ audio/avctp.c   |   50 ++++--
+ audio/avctp.h   |    1 +
+ audio/avrcp.c   |  471 +++++++++++++++++++++++++++++++++++++++++++++++++++----
+ audio/avrcp.h   |   26 ++-
+ audio/control.c |   40 ++++-
+ audio/control.h |    7 +
+ lib/sdp.h       |    1 +
+ 7 files changed, 540 insertions(+), 56 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index ae3c04e..26f7fbe 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -412,23 +412,30 @@ static void handle_response(struct avctp *session, struct avctp_header *avctp,
+ 				size_t operand_count)
+ {
+ 	GSList *l;
+-
++	/* 
++	 * Ignore passthrough command rsponses because it messes up
++	 * the transaction id numbering
++	 */
++	if(avc->code == 0x09 && avc->opcode == 0x7C){
++		return;
++	}
++	
+ 	for (l = session->handlers; l; l = l->next) {
+ 		struct avctp_rsp_handler *handler = l->data;
+-
++		
+ 		if (handler->id != avctp->transaction)
+ 			continue;
+ 
+ 		if (handler->func && handler->func(session, avc->code,
+-						avc->subunit_type,
+-						operands, operand_count,
+-						handler->user_data))
+-			return;
+-
++					avc->subunit_type,
++					operands, operand_count,
++					handler->user_data))
++				return;
++				
+ 		session->handlers = g_slist_remove(session->handlers, handler);
+ 		g_free(handler);
+-
+-		return;
++			
++		return;			
+ 	}
+ }
+ 
+@@ -900,7 +907,7 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
+ 
+ 	memset(buf, 0, sizeof(buf));
+ 
+-	avctp->transaction = id++;
++	avctp->transaction = id;
+ 	avctp->packet_type = AVCTP_PACKET_SINGLE;
+ 	avctp->cr = AVCTP_COMMAND;
+ 	avctp->pid = htons(AV_REMOTE_SVCLASS_ID);
+@@ -916,14 +923,21 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
+ 
+ 	if (write(sk, buf, sizeof(buf)) < 0)
+ 		return -errno;
+-
++	DBG("Passthru Press send with id: %d", id);
++	id++;
++	id %= 16;
++	
+ 	/* Button release */
+-	avctp->transaction = id++;
++	avctp->transaction = id;
++	
+ 	operands[0] |= 0x80;
+ 
+ 	if (write(sk, buf, sizeof(buf)) < 0)
+ 		return -errno;
+-
++	DBG("Passthru Release send with id: %d", id);
++	id++;
++	id %= 16;
++	
+ 	return 0;
+ }
+ 
+@@ -964,6 +978,7 @@ static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
+ 		err = -errno;
+ 
+ 	g_free(buf);
++	DBG("Vendor send with id: %d", transaction);
+ 	return err;
+ }
+ 
+@@ -985,8 +1000,10 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
+ 
+ 	err = avctp_send(session, id, AVCTP_COMMAND, code, subunit,
+ 				AVC_OP_VENDORDEP, operands, operand_count);
+-	if (err < 0)
++	if (err < 0){
++		DBG("Vendor send error: %d",err);
+ 		return err;
++	}
+ 
+ 	handler = g_new0(struct avctp_rsp_handler, 1);
+ 	handler->id = id;
+@@ -994,9 +1011,11 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
+ 	handler->user_data = user_data;
+ 
+ 	session->handlers = g_slist_prepend(session->handlers, handler);
+-
++	
+ 	id++;
++	id %= 16; //transaction id is only 4 bits
+ 
++	
+ 	return 0;
+ }
+ 
+@@ -1075,6 +1094,7 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
+ 	GError *err = NULL;
+ 	GIOChannel *io;
+ 
++	DBG("src: %s, dst: %s", batostr(src),batostr(dst));
+ 	session = avctp_get_internal(src, dst);
+ 	if (!session)
+ 		return NULL;
+diff --git a/audio/avctp.h b/audio/avctp.h
+index d0cbd97..3ecdada 100644
+--- a/audio/avctp.h
++++ b/audio/avctp.h
+@@ -23,6 +23,7 @@
+  */
+ 
+ #define AVCTP_PSM 23
++#define AVCTP_BROWSING_PSM		27
+ 
+ #define AVC_MTU 512
+ #define AVC_HEADER_LENGTH 3
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 89ee112..6a81ae3 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -57,6 +57,7 @@
+ #include "avrcp.h"
+ #include "sdpd.h"
+ #include "dbus-common.h"
++#include "control.h"
+ 
+ /* Company IDs for vendor dependent commands */
+ #define IEEEID_BTSIG		0x001958
+@@ -95,12 +96,14 @@
+ #define CAP_EVENTS_SUPPORTED	0x03
+ 
+ #define AVRCP_REGISTER_NOTIFICATION_PARAM_LENGTH 5
++#define AVRCP_GET_CAPABILITIES_PARAM_LENGTH 1
+ 
+ #define AVRCP_FEATURE_CATEGORY_1	0x0001
+ #define AVRCP_FEATURE_CATEGORY_2	0x0002
+ #define AVRCP_FEATURE_CATEGORY_3	0x0004
+ #define AVRCP_FEATURE_CATEGORY_4	0x0008
+ #define AVRCP_FEATURE_PLAYER_SETTINGS	0x0010
++#define AVRCP_FEATURE_BROWSING			0x0040
+ 
+ enum battery_status {
+ 	BATTERY_STATUS_NORMAL =		0,
+@@ -147,6 +150,7 @@ struct avrcp_server {
+ 	uint32_t ct_record_id;
+ 	GSList *players;
+ 	struct avrcp_player *active_player;
++	struct avctp *session;
+ };
+ 
+ struct pending_pdu {
+@@ -170,6 +174,13 @@ struct avrcp_player {
+ 	GDestroyNotify destroy;
+ };
+ 
++struct avrcp_state_callback {
++	avrcp_state_cb cb;
++	void *user_data;
++	unsigned int id;
++};
++
++static GSList *callbacks = NULL;
+ static GSList *servers = NULL;
+ static unsigned int avctp_id = 0;
+ 
+@@ -179,71 +190,97 @@ static uint32_t company_ids[] = {
+ };
+ 
+ static void register_volume_notification(struct avrcp_player *player);
++static void avrcp_register_notification(struct control *con, uint8_t event);
++static void avrcp_get_element_attributes(struct control *con);
++
+ 
+ static sdp_record_t *avrcp_ct_record(void)
+ {
+-	sdp_list_t *svclass_id, *pfseq, *apseq, *root;
+-	uuid_t root_uuid, l2cap, avctp, avrct;
++	sdp_list_t *svclass_id, *pfseq, *apseq, *apseq1, *root;
++	uuid_t root_uuid, l2cap, avctp, avrct, avrctr;
+ 	sdp_profile_desc_t profile[1];
+-	sdp_list_t *aproto, *proto[2];
++	sdp_list_t *aproto, *aproto1, *proto[2], *proto1[2];
+ 	sdp_record_t *record;
+-	sdp_data_t *psm, *version, *features;
+-	uint16_t lp = AVCTP_PSM;
+-	uint16_t avrcp_ver = 0x0100, avctp_ver = 0x0103;
++	sdp_data_t *psm[2], *version, *features;
++	uint16_t lp = AVCTP_PSM, ap = AVCTP_BROWSING_PSM;
++	uint16_t avrcp_ver = 0x0105, avctp_ver = 0x0103;
+ 	uint16_t feat = ( AVRCP_FEATURE_CATEGORY_1 |
+ 						AVRCP_FEATURE_CATEGORY_2 |
+ 						AVRCP_FEATURE_CATEGORY_3 |
+-						AVRCP_FEATURE_CATEGORY_4 );
++						AVRCP_FEATURE_CATEGORY_4 |
++						AVRCP_FEATURE_BROWSING);
+ 
+ 	record = sdp_record_alloc();
+ 	if (!record)
+ 		return NULL;
+ 
+ 	sdp_uuid16_create(&root_uuid, PUBLIC_BROWSE_GROUP);
+-	root = sdp_list_append(0, &root_uuid);
++	root = sdp_list_append(NULL, &root_uuid);
+ 	sdp_set_browse_groups(record, root);
+ 
+ 	/* Service Class ID List */
+ 	sdp_uuid16_create(&avrct, AV_REMOTE_SVCLASS_ID);
+-	svclass_id = sdp_list_append(0, &avrct);
++	svclass_id = sdp_list_append(NULL, &avrct);
++	sdp_uuid16_create(&avrctr, AV_REMOTE_CONTROLLER_SVCLASS_ID);
++	svclass_id = sdp_list_append(svclass_id, &avrctr);
+ 	sdp_set_service_classes(record, svclass_id);
+ 
+ 	/* Protocol Descriptor List */
+ 	sdp_uuid16_create(&l2cap, L2CAP_UUID);
+-	proto[0] = sdp_list_append(0, &l2cap);
+-	psm = sdp_data_alloc(SDP_UINT16, &lp);
+-	proto[0] = sdp_list_append(proto[0], psm);
+-	apseq = sdp_list_append(0, proto[0]);
++	proto[0] = sdp_list_append(NULL, &l2cap);
++	psm[0] = sdp_data_alloc(SDP_UINT16, &lp);
++	proto[0] = sdp_list_append(proto[0], psm[0]);
++	apseq = sdp_list_append(NULL, proto[0]);
+ 
+ 	sdp_uuid16_create(&avctp, AVCTP_UUID);
+-	proto[1] = sdp_list_append(0, &avctp);
++	proto[1] = sdp_list_append(NULL, &avctp);
+ 	version = sdp_data_alloc(SDP_UINT16, &avctp_ver);
+ 	proto[1] = sdp_list_append(proto[1], version);
+ 	apseq = sdp_list_append(apseq, proto[1]);
+ 
+-	aproto = sdp_list_append(0, apseq);
++	aproto = sdp_list_append(NULL, apseq);
+ 	sdp_set_access_protos(record, aproto);
+ 
++	/* Additional Protocol Descriptor List */
++	sdp_uuid16_create(&l2cap, L2CAP_UUID);
++	proto1[0] = sdp_list_append(NULL, &l2cap);
++	psm[1] = sdp_data_alloc(SDP_UINT16, &ap);
++	proto1[0] = sdp_list_append(proto1[0], psm[1]);
++	apseq1 = sdp_list_append(NULL, proto1[0]);
++
++	sdp_uuid16_create(&avctp, AVCTP_UUID);
++	proto1[1] = sdp_list_append(NULL, &avctp);
++	proto1[1] = sdp_list_append(proto1[1], version);
++	apseq1 = sdp_list_append(apseq1, proto1[1]);
++
++	aproto1 = sdp_list_append(NULL, apseq1);
++	sdp_set_add_access_protos(record, aproto1);
++
+ 	/* Bluetooth Profile Descriptor List */
+ 	sdp_uuid16_create(&profile[0].uuid, AV_REMOTE_PROFILE_ID);
+ 	profile[0].version = avrcp_ver;
+-	pfseq = sdp_list_append(0, &profile[0]);
++	pfseq = sdp_list_append(NULL, &profile[0]);
+ 	sdp_set_profile_descs(record, pfseq);
+ 
+ 	features = sdp_data_alloc(SDP_UINT16, &feat);
+ 	sdp_attr_add(record, SDP_ATTR_SUPPORTED_FEATURES, features);
+ 
+-	sdp_set_info_attr(record, "AVRCP CT", 0, 0);
++	sdp_set_info_attr(record, "AVRCP CT", NULL, NULL);
+ 
+-	free(psm);
++	free(psm[0]);
++	free(psm[1]);
+ 	free(version);
+-	sdp_list_free(proto[0], 0);
+-	sdp_list_free(proto[1], 0);
+-	sdp_list_free(apseq, 0);
+-	sdp_list_free(pfseq, 0);
+-	sdp_list_free(aproto, 0);
+-	sdp_list_free(root, 0);
+-	sdp_list_free(svclass_id, 0);
++	sdp_list_free(proto[0], NULL);
++	sdp_list_free(proto[1], NULL);
++	sdp_list_free(apseq, NULL);
++	sdp_list_free(proto1[0], NULL);
++	sdp_list_free(proto1[1], NULL);
++	sdp_list_free(aproto1, NULL);
++	sdp_list_free(apseq1, NULL);
++	sdp_list_free(pfseq, NULL);
++	sdp_list_free(aproto, NULL);
++	sdp_list_free(root, NULL);
++	sdp_list_free(svclass_id, NULL);
+ 
+ 	return record;
+ }
+@@ -1132,6 +1169,7 @@ size_t avrcp_handle_vendor_reject(uint8_t *code, uint8_t *operands)
+ 
+ static struct avrcp_server *find_server(GSList *list, const bdaddr_t *src)
+ {
++	DBG("Finding server for: %s", batostr(src));
+ 	for (; list; list = list->next) {
+ 		struct avrcp_server *server = list->data;
+ 
+@@ -1196,6 +1234,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 	sdp_list_t *list;
+ 	sdp_profile_desc_t *desc;
+ 
++	
+ 	server = find_server(servers, &dev->src);
+ 	if (!server)
+ 		return;
+@@ -1217,6 +1256,8 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 
+ 		break;
+ 	case AVCTP_STATE_CONNECTING:
++		DBG("new state: Connecting");
++		//avrcp_get_capabilities(dev);
+ 		player->session = avctp_connect(&dev->src, &dev->dst);
+ 		player->dev = dev;
+ 
+@@ -1227,6 +1268,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 							player);
+ 		break;
+ 	case AVCTP_STATE_CONNECTED:
++		DBG("AVCTP Connected******************");
+ 		rec = btd_device_get_record(dev->btd_dev, AVRCP_TARGET_UUID);
+ 		if (rec == NULL)
+ 			return;
+@@ -1236,8 +1278,9 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 
+ 		desc = list->data;
+ 
+-		if (desc && desc->version >= 0x0104)
++		if (desc && desc->version >= 0x0104){
+ 			register_volume_notification(player);
++		}
+ 
+ 		sdp_list_free(list, free);
+ 	default:
+@@ -1247,12 +1290,22 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 
+ gboolean avrcp_connect(struct audio_device *dev)
+ {
++	struct avrcp_server *server;
+ 	struct avctp *session;
+ 
+-	session = avctp_connect(&dev->src, &dev->dst);
+-	if (session)
++	DBG("Connecting to avrcp...");
++	server = find_server(servers, &dev->src);
++	if (server == NULL){
++		DBG("Server not found");
+ 		return FALSE;
++	}
+ 
++	session = avctp_connect(&dev->src, &dev->dst);
++	if (session){
++		DBG("Connecting to avrcp failed");
++		return FALSE;
++	}
++	DBG("Connecting to avrcp success...");
+ 	return TRUE;
+ }
+ 
+@@ -1466,3 +1519,365 @@ int avrcp_set_volume(struct audio_device *dev, uint8_t volume)
+ 					AVC_SUBUNIT_PANEL, buf, sizeof(buf),
+ 					avrcp_handle_set_volume, player);
+ }
++
++static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
++					uint8_t code, uint8_t subunit,
++					uint8_t *operands, size_t operand_count,
++					void *user_data)
++{
++	struct control *control_ptr = user_data;
++	struct avrcp_header *pdu = (void *) operands;
++	uint16_t events = 0;
++	uint8_t count;
++
++	if (pdu == NULL || pdu->params[0] != CAP_EVENTS_SUPPORTED)
++		return FALSE;
++	DBG("get capabilities response");
++	/* Connect browsing if pending */
++	/*
++	if (session->browsing_timer > 0) {
++		g_source_remove(session->browsing_timer);
++		session->browsing_timer = 0;
++		avctp_connect_browsing(session->conn);
++	}
++	*/
++	count = pdu->params[1];
++
++	for (; count > 0; count--) {
++		uint8_t event = pdu->params[1 + count];
++
++		events |= (1 << event);
++
++		switch (event) {
++		case AVRCP_EVENT_STATUS_CHANGED:
++		case AVRCP_EVENT_TRACK_CHANGED:
++		//case AVRCP_EVENT_SETTINGS_CHANGED:
++		//case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
++		//case AVRCP_EVENT_UIDS_CHANGED:
++		//case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
++		//case AVRCP_EVENT_VOLUME_CHANGED:
++			DBG("Event Supported: %d", event);
++			avrcp_register_notification(control_ptr, event);
++			break;
++		}
++	}
++	/*
++	if (!(events & (1 << AVRCP_EVENT_SETTINGS_CHANGED)))
++		avrcp_list_player_attributes(session);
++
++	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
++		avrcp_get_play_status(session);
++    */
++	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
++		avrcp_get_element_attributes(control_ptr);
++
++	return TRUE;
++}
++ 
++void avrcp_get_capabilities(struct control *con)
++{
++	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_GET_CAPABILITIES_PARAM_LENGTH];
++	struct avrcp_header *pdu = (void *) buf;
++	uint8_t length;
++	
++
++	if (con->session == NULL)
++		return;
++
++	memset(buf, 0, sizeof(buf));
++
++	set_company_id(pdu->company_id, IEEEID_BTSIG);
++	pdu->pdu_id = AVRCP_GET_CAPABILITIES;
++	pdu->packet_type = AVRCP_PACKET_TYPE_SINGLE;
++	pdu->params[0] = CAP_EVENTS_SUPPORTED;
++	pdu->params_len = htons(AVRCP_GET_CAPABILITIES_PARAM_LENGTH);
++
++	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
++	DBG("Getting caps for session: %p", con->session);
++	avctp_send_vendordep_req(con->session, AVC_CTYPE_STATUS,
++					AVC_SUBUNIT_PANEL, buf, length,
++					avrcp_get_capabilities_resp,
++					con);
++}
++
++static const char *metadata_to_str(uint32_t id)
++{
++	switch (id) {
++	case AVRCP_MEDIA_ATTRIBUTE_TITLE:
++		return "Title";
++	case AVRCP_MEDIA_ATTRIBUTE_ARTIST:
++		return "Artist";
++	case AVRCP_MEDIA_ATTRIBUTE_ALBUM:
++		return "Album";
++	case AVRCP_MEDIA_ATTRIBUTE_GENRE:
++		return "Genre";
++	case AVRCP_MEDIA_ATTRIBUTE_TRACK:
++		return "TrackNumber";
++	case AVRCP_MEDIA_ATTRIBUTE_N_TRACKS:
++		return "NumberOfTracks";
++	case AVRCP_MEDIA_ATTRIBUTE_DURATION:
++		return "Duration";
++	}
++
++	return NULL;
++}
++
++void set_metadata(struct control *con,
++				struct media_item *item, const char *key,
++				void *data, size_t len)
++{
++	char *value, *curval;
++
++	value = g_strndup(data, len);
++
++	DBG("%s: %s", key, value);
++	if(con->metadata == NULL){
++		return;
++	}
++	curval = g_hash_table_lookup(con->metadata, key);
++	if (g_strcmp0(curval, value) == 0) {
++		g_free(value);
++		return;
++	}
++
++	g_hash_table_replace(con->metadata, g_strdup(key), value);
++}
++
++static void avrcp_parse_attribute_list(struct control *con,
++					uint8_t *operands, uint8_t count)
++{
++	//struct media_player *mp = player->user_data;
++	//struct media_item *item;
++	int i;
++    char *value;
++	//item = media_player_set_playlist_item(mp, player->uid);
++
++	for (i = 0; count > 0; count--) {
++		uint32_t id;
++		uint16_t charset, len;
++
++		id = bt_get_be32(&operands[i]);
++		i += sizeof(uint32_t);
++
++		charset = bt_get_be16(&operands[i]);
++		i += sizeof(uint16_t);
++
++		len = bt_get_be16(&operands[i]);
++		i += sizeof(uint16_t);
++
++		if (charset == 106) {
++			const char *key = metadata_to_str(id);
++			if (key != NULL){
++				set_metadata(con, NULL,
++							metadata_to_str(id),
++							&operands[i], len);
++			}
++		}
++
++		i += len;
++	}
++}
++
++static gboolean avrcp_get_element_attributes_rsp(struct avctp *conn,
++						uint8_t code, uint8_t subunit,
++						uint8_t *operands,
++						size_t operand_count,
++						void *user_data)
++{
++	struct control *con = user_data;
++	struct audio_device *dev;
++	GSList *l;
++	//struct avrcp_player *player = session->controller->player;
++
++	struct avrcp_header *pdu = (void *) operands;
++	uint8_t count;
++	/*con->
++	dev = manager_get_device(conn->server->src, conn->dst, FALSE);
++	if (dev == NULL) {
++		DGB("no matching audio device");
++		return FALSE;
++	}
++	* */
++
++	if (code == AVC_CTYPE_REJECTED)
++		return FALSE;
++
++	count = pdu->params[0];
++
++	if (ntohs(pdu->params_len) - 1 < count * 8) {
++		error("Invalid parameters");
++		return FALSE;
++	}
++
++	//count is number of attributes
++	
++	avrcp_parse_attribute_list(con, &pdu->params[1], count);
++	
++	// call the callback
++	for (l = callbacks; l != NULL; l = l->next) {
++		struct avrcp_state_callback *cb = l->data;
++		cb->cb(con->dev, con);
++	}
++
++	//avrcp_get_play_status(session);
++
++	return TRUE;
++}
++
++static void avrcp_get_element_attributes(struct control *con)
++{
++	uint8_t buf[AVRCP_HEADER_LENGTH + 9];
++	struct avrcp_header *pdu = (void *) buf;
++	uint16_t length;
++
++	memset(buf, 0, sizeof(buf));
++
++	set_company_id(pdu->company_id, IEEEID_BTSIG);
++	pdu->pdu_id = AVRCP_GET_ELEMENT_ATTRIBUTES;
++	pdu->params_len = htons(9);
++	pdu->packet_type = AVRCP_PACKET_TYPE_SINGLE;
++
++	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
++
++	avctp_send_vendordep_req(con->session, AVC_CTYPE_STATUS,
++					AVC_SUBUNIT_PANEL, buf, length,
++					avrcp_get_element_attributes_rsp,
++					con);
++}
++
++static const char *status_to_string(uint8_t status)
++{
++	switch (status) {
++	case AVRCP_PLAY_STATUS_STOPPED:
++		return "stopped";
++	case AVRCP_PLAY_STATUS_PLAYING:
++		return "playing";
++	case AVRCP_PLAY_STATUS_PAUSED:
++		return "paused";
++	case AVRCP_PLAY_STATUS_FWD_SEEK:
++		return "forward-seek";
++	case AVRCP_PLAY_STATUS_REV_SEEK:
++		return "reverse-seek";
++	case AVRCP_PLAY_STATUS_ERROR:
++		return "error";
++	default:
++		return NULL;
++	}
++}
++
++static gboolean avrcp_handle_event(struct avctp *conn,
++					uint8_t code, uint8_t subunit,
++					uint8_t *operands, size_t operand_count,
++					void *user_data)
++{
++	struct control *session = user_data;
++	struct avrcp_header *pdu = (void *) operands;
++	const char *curval, *strval;
++	uint8_t event;
++
++	if ((code != AVC_CTYPE_INTERIM && code != AVC_CTYPE_CHANGED) ||
++								pdu == NULL)
++		return FALSE;
++
++	event = pdu->params[0];
++
++	if (code == AVC_CTYPE_CHANGED) {
++		switch (event){
++			case AVRCP_EVENT_TRACK_CHANGED:
++			DBG("Track changed baby!!!");
++			avrcp_register_notification(session, event);
++			break;
++			case AVRCP_EVENT_STATUS_CHANGED:
++			avrcp_register_notification(session, event);
++			break;
++		}
++		//session->registered_events ^= (1 << event);
++		//avrcp_register_notification(session, event);
++		return FALSE;
++	}
++
++	switch (event) {
++	case AVRCP_EVENT_VOLUME_CHANGED:
++	
++		//avrcp_volume_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_STATUS_CHANGED:
++		strval = status_to_string(pdu->params[1]);
++		DBG("EVENT_STATUS_CHANGED: %s", strval);
++		//avrcp_status_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_TRACK_CHANGED:
++		avrcp_get_element_attributes(session);
++		//DBG("Track changed baby!!!");
++		//avrcp_track_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_SETTINGS_CHANGED:
++		//avrcp_setting_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
++		//avrcp_available_players_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
++		//avrcp_addressed_player_changed(session, pdu);
++		break;
++	case AVRCP_EVENT_UIDS_CHANGED:
++		//avrcp_uids_changed(session, pdu);
++		break;
++	}
++
++	//session->registered_events |= (1 << event);
++
++	return TRUE;
++}
++
++static void avrcp_register_notification(struct control *con, uint8_t event)
++{
++	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_REGISTER_NOTIFICATION_PARAM_LENGTH];
++	struct avrcp_header *pdu = (void *) buf;
++	uint8_t length;
++
++	memset(buf, 0, sizeof(buf));
++
++	set_company_id(pdu->company_id, IEEEID_BTSIG);
++	pdu->pdu_id = AVRCP_REGISTER_NOTIFICATION;
++	pdu->packet_type = AVRCP_PACKET_TYPE_SINGLE;
++	pdu->params[0] = event;
++	pdu->params_len = htons(AVRCP_REGISTER_NOTIFICATION_PARAM_LENGTH);
++
++	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
++
++	avctp_send_vendordep_req(con->session, AVC_CTYPE_NOTIFY,
++					AVC_SUBUNIT_PANEL, buf, length,
++					avrcp_handle_event, con);
++}
++
++unsigned int avrcp_add_state_cb(avrcp_state_cb cb, void *user_data)
++{
++	struct avrcp_state_callback *state_cb;
++	static unsigned int id = 0;
++
++	state_cb = g_new(struct avrcp_state_callback, 1);
++	state_cb->cb = cb;
++	state_cb->user_data = user_data;
++	state_cb->id = ++id;
++
++	callbacks = g_slist_append(callbacks, state_cb);
++
++	return state_cb->id;
++}
++
++gboolean avrcp_remove_state_cb(unsigned int id)
++{
++	GSList *l;
++
++	for (l = callbacks; l != NULL; l = l->next) {
++		struct avrcp_state_callback *cb = l->data;
++		if (cb && cb->id == id) {
++			callbacks = g_slist_remove(callbacks, cb);
++			g_free(cb);
++			return TRUE;
++		}
++	}
++
++	return FALSE;
++}
+diff --git a/audio/avrcp.h b/audio/avrcp.h
+index bf11a6c..9593ad2 100644
+--- a/audio/avrcp.h
++++ b/audio/avrcp.h
+@@ -69,12 +69,16 @@
+ #define AVRCP_PLAY_STATUS_ERROR		0xFF
+ 
+ /* Notification events */
+-#define AVRCP_EVENT_STATUS_CHANGED	0x01
+-#define AVRCP_EVENT_TRACK_CHANGED	0x02
+-#define AVRCP_EVENT_TRACK_REACHED_END	0x03
+-#define AVRCP_EVENT_TRACK_REACHED_START	0x04
+-#define AVRCP_EVENT_VOLUME_CHANGED	0x0d
+-#define AVRCP_EVENT_LAST		AVRCP_EVENT_VOLUME_CHANGED
++#define AVRCP_EVENT_STATUS_CHANGED		0x01
++#define AVRCP_EVENT_TRACK_CHANGED		0x02
++#define AVRCP_EVENT_TRACK_REACHED_END		0x03
++#define AVRCP_EVENT_TRACK_REACHED_START		0x04
++#define AVRCP_EVENT_SETTINGS_CHANGED		0x08
++#define AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED	0x0a
++#define AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED	0x0b
++#define AVRCP_EVENT_UIDS_CHANGED		0x0c
++#define AVRCP_EVENT_VOLUME_CHANGED		0x0d
++#define AVRCP_EVENT_LAST			AVRCP_EVENT_VOLUME_CHANGED
+ 
+ struct avrcp_player_cb {
+ 	int (*get_setting) (uint8_t attr, void *user_data);
+@@ -88,6 +92,14 @@ struct avrcp_player_cb {
+ 							void *user_data);
+ };
+ 
++typedef void (*avrcp_state_cb) (struct audio_device *dev,
++				//avrcp_state_t old_state,
++				//avrcp_state_t new_state,
++				void *user_data);
++				
++unsigned int avrcp_add_state_cb(avrcp_state_cb cb, void *user_data);
++gboolean avrcp_remove_state_cb(unsigned int id);
++
+ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config);
+ void avrcp_unregister(const bdaddr_t *src);
+ 
+@@ -95,6 +107,8 @@ gboolean avrcp_connect(struct audio_device *dev);
+ void avrcp_disconnect(struct audio_device *dev);
+ int avrcp_set_volume(struct audio_device *dev, uint8_t volume);
+ 
++void avrcp_get_capabilities(struct control *con);
++
+ struct avrcp_player *avrcp_register_player(const bdaddr_t *src,
+ 						struct avrcp_player_cb *cb,
+ 						void *user_data,
+diff --git a/audio/control.c b/audio/control.c
+index 7555225..898bef3 100644
+--- a/audio/control.c
++++ b/audio/control.c
+@@ -50,19 +50,14 @@
+ #include "device.h"
+ #include "manager.h"
+ #include "avctp.h"
++#include "avrcp.h"
+ #include "control.h"
+ #include "sdpd.h"
+ #include "glib-helper.h"
+ #include "dbus-common.h"
+ 
+ static unsigned int avctp_id = 0;
+-
+-struct control {
+-	struct audio_device *dev;
+-	struct avctp *session;
+-
+-	gboolean target;
+-};
++static unsigned int avrcp_id = 0;
+ 
+ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 				avctp_state_t new_state, void *user_data)
+@@ -94,6 +89,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 
+ 		break;
+ 	case AVCTP_STATE_CONNECTED:
++		avrcp_get_capabilities(control);
+ 		value = TRUE;
+ 		g_dbus_emit_signal(dev->conn, dev->path,
+ 				AUDIO_CONTROL_INTERFACE, "Connected",
+@@ -107,6 +103,33 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 	}
+ }
+ 
++static void media_status_changed(struct audio_device *dev, 
++		void *user_data)
++{
++	struct control *con = user_data;
++	gboolean value = TRUE;
++	dbus_uint32_t serial = 0;
++	DBusMessage *msg;
++	DBusMessageIter args;
++	
++	char * array[7];	
++	char ** test = &array[0];
++	
++	array[0] = g_hash_table_lookup(con->metadata,"Title");
++	array[1] = g_hash_table_lookup(con->metadata,"Artist");
++	array[2] = g_hash_table_lookup(con->metadata,"Album");
++	array[3] = g_hash_table_lookup(con->metadata,"TrackNumber");
++	array[4] = g_hash_table_lookup(con->metadata,"NumberOfTracks");
++	array[5] = g_hash_table_lookup(con->metadata,"Genre");
++	array[6] = g_hash_table_lookup(con->metadata,"Duration");
++		
++	DBG("callback is called for %s",batostr(&dev->src));
++	DBG("%s",array[0]);
++	emit_array_property_changed(dev->conn, dev->path, AUDIO_CONTROL_INTERFACE,
++					"Metadata", DBUS_TYPE_STRING, &test, 7);
++					
++}
++
+ static DBusMessage *control_is_connected(DBusConnection *conn,
+ 						DBusMessage *msg,
+ 						void *data)
+@@ -293,11 +316,14 @@ struct control *control_init(struct audio_device *dev, uint16_t uuid16)
+ 
+ 	control = g_new0(struct control, 1);
+ 	control->dev = dev;
++	control->metadata = g_hash_table_new(g_str_hash, g_str_equal);
+ 
+ 	control_update(control, uuid16);
+ 
+ 	if (!avctp_id)
+ 		avctp_id = avctp_add_state_cb(state_changed, NULL);
++	if (!avrcp_id)
++		avrcp_id = avrcp_add_state_cb(media_status_changed, NULL);
+ 
+ 	return control;
+ }
+diff --git a/audio/control.h b/audio/control.h
+index 2219e5f..57b1b60 100644
+--- a/audio/control.h
++++ b/audio/control.h
+@@ -24,6 +24,13 @@
+ 
+ #define AUDIO_CONTROL_INTERFACE "org.bluez.Control"
+ 
++struct control {
++	struct audio_device *dev;
++	struct avctp        *session;
++	GHashTable          *metadata;
++	gboolean target;
++};
++
+ struct control *control_init(struct audio_device *dev, uint16_t uuid16);
+ void control_update(struct control *control, uint16_t uuid16);
+ void control_unregister(struct audio_device *dev);
+diff --git a/lib/sdp.h b/lib/sdp.h
+index 2fe74d5..df525ad 100644
+--- a/lib/sdp.h
++++ b/lib/sdp.h
+@@ -95,6 +95,7 @@ extern "C" {
+ #define AV_REMOTE_TARGET_SVCLASS_ID	0x110c
+ #define ADVANCED_AUDIO_SVCLASS_ID	0x110d
+ #define AV_REMOTE_SVCLASS_ID		0x110e
++#define AV_REMOTE_CONTROLLER_SVCLASS_ID 0x110f
+ #define VIDEO_CONF_SVCLASS_ID		0x110f
+ #define INTERCOM_SVCLASS_ID		0x1110
+ #define FAX_SVCLASS_ID			0x1111
+-- 
