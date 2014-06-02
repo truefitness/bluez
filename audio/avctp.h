@@ -67,7 +67,9 @@ struct avctp;
 typedef enum {
 	AVCTP_STATE_DISCONNECTED = 0,
 	AVCTP_STATE_CONNECTING,
-	AVCTP_STATE_CONNECTED
+	AVCTP_STATE_CONNECTED,
+	AVCTP_STATE_BROWSING_CONNECTING,
+	AVCTP_STATE_BROWSING_CONNECTED
 } avctp_state_t;
 
 typedef void (*avctp_state_cb) (struct audio_device *dev,
@@ -82,6 +84,9 @@ typedef size_t (*avctp_pdu_cb) (struct avctp *session, uint8_t transaction,
 typedef gboolean (*avctp_rsp_cb) (struct avctp *session, uint8_t code,
 					uint8_t subunit, uint8_t *operands,
 					size_t operand_count, void *user_data);
+typedef gboolean (*avctp_browsing_rsp_cb) (struct avctp *session,
+					uint8_t *operands, size_t operand_count,
+					void *user_data);
 
 unsigned int avctp_add_state_cb(avctp_state_cb cb, void *user_data);
 gboolean avctp_remove_state_cb(unsigned int id);

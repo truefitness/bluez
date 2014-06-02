@@ -29,6 +29,7 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
 #include <assert.h>
@@ -41,6 +42,7 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/sdp.h>
 #include <bluetooth/uuid.h>
+#include <bluetooth/l2cap.h>
 
 #include <glib.h>
 
@@ -128,6 +130,12 @@ struct avctp_rsp_handler {
 	void *user_data;
 };
 
+struct avctp_browsing_rsp_handler {
+	uint8_t id;
+	avctp_browsing_rsp_cb func;
+	void *user_data;
+};
+
 struct avctp {
 	struct avctp_server *server;
 	bdaddr_t dst;
@@ -137,12 +145,18 @@ struct avctp {
 	int uinput;
 
 	GIOChannel *io;
+	GIOChannel *browsing;
+	
 	guint io_id;
+	guint browsing_id;
 
 	uint16_t mtu;
+	uint16_t mtu_browsing;
 
 	uint8_t key_quirks[256];
 	GSList *handlers;
+	
+	bool initiator;
 };
 
 struct avctp_pdu_handler {
@@ -541,6 +555,115 @@ failed:
 	return FALSE;
 }
 
+static void browsing_response(struct avctp *session, struct avctp_header *avctp,
+				uint8_t *operands, size_t operand_count)
+{
+	GSList *l;
+	
+	for (l = session->handlers; l; l = l->next) {
+		struct avctp_browsing_rsp_handler *handler = l->data;
+		
+		if (handler->id != avctp->transaction)
+			continue;
+
+		if (handler->func && handler->func(session,
+					operands, operand_count,
+					handler->user_data))
+				return;
+				
+		session->handlers = g_slist_remove(session->handlers, handler);
+		g_free(handler);
+			
+		return;			
+	}
+}
+
+static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+				gpointer data)
+{
+	struct avctp *session = data;
+	uint8_t buf[1024], *operands, code, subunit;
+	struct avctp_header *avctp;
+	struct avc_header *avc;
+	int ret, packet_size, operand_count, sock;
+	struct avctp_pdu_handler *handler;
+
+	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+		goto failed;
+
+	sock = g_io_channel_unix_get_fd(session->io);
+
+	ret = read(sock, buf, sizeof(buf));
+	if (ret <= 0)
+		goto failed;
+
+	DBG("Got %d bytes of data for AVCTP browsing session %p", ret, session);
+
+	avctp = (struct avctp_header *) buf;
+
+	if (avctp->packet_type != AVCTP_PACKET_SINGLE) {
+		error("Packet is not the correct type");
+		goto failed;
+	}
+	
+	operands = buf + AVCTP_HEADER_LENGTH;
+	ret -= AVCTP_HEADER_LENGTH;
+	operand_count = ret;
+
+	if (avctp->cr == AVCTP_RESPONSE) {
+		/* 
+		 * This gets in response to browsing commands that originated from
+		 * here.
+		 */
+		browsing_response(session, avctp, operands, operand_count);
+		return TRUE;
+	}
+
+	packet_size = AVCTP_HEADER_LENGTH + AVC_HEADER_LENGTH;
+	avctp->cr = AVCTP_RESPONSE;
+
+	if (avctp->packet_type != AVCTP_PACKET_SINGLE) {
+		avc->code = AVC_CTYPE_NOT_IMPLEMENTED;
+		goto done;
+	}
+
+	if (avctp->pid != htons(AV_REMOTE_SVCLASS_ID)) {
+		avctp->ipid = 1;
+		avc->code = AVC_CTYPE_REJECTED;
+		goto done;
+	}
+
+	handler = find_handler(handlers, avc->opcode);
+	if (!handler) {
+		DBG("handler not found for 0x%02x", avc->opcode);
+		packet_size += avrcp_handle_vendor_reject(&code, operands);
+		avc->code = code;
+		goto done;
+	}
+
+	code = avc->code;
+	subunit = avc->subunit_type;
+
+	packet_size += handler->cb(session, avctp->transaction, &code,
+					&subunit, operands, operand_count,
+					handler->user_data);
+
+	avc->code = code;
+	avc->subunit_type = subunit;
+
+done:
+	ret = write(sock, buf, packet_size);
+	if (ret != packet_size)
+		goto failed;
+
+	return TRUE;
+
+failed:
+	DBG("AVCTP session %p got disconnected", session);
+	avctp_set_state(session, AVCTP_STATE_DISCONNECTED);
+	return FALSE;
+}
+
 static int uinput_create(char *name)
 {
 	struct uinput_dev dev;
@@ -656,6 +779,50 @@ static void avctp_connect_cb(GIOChannel *chan, GError *err, gpointer data)
 	session->io_id = g_io_add_watch(chan,
 				G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
 				(GIOFunc) session_cb, session);
+}
+
+static void avctp_connect_browsing_cb(GIOChannel *chan, GError *err, gpointer data)
+{
+	struct avctp *session = data;
+	char address[18];
+	uint16_t imtu;
+	GError *gerr = NULL;
+
+	if (err) {
+		error("Browsing %s", err->message);
+		goto fail;
+	}
+
+	bt_io_get(chan, BT_IO_L2CAP, &gerr,
+			BT_IO_OPT_DEST, &address,
+			BT_IO_OPT_IMTU, &imtu,
+			BT_IO_OPT_INVALID);
+	if (gerr) {
+		error("%s", gerr->message);
+		g_io_channel_shutdown(chan, TRUE, NULL);
+		g_io_channel_unref(chan);
+		g_error_free(gerr);
+		goto fail;
+	}
+
+	DBG("AVCTP Browsing: connected to %s", address);
+
+	if (!session->browsing)
+		session->browsing = g_io_channel_ref(chan);
+
+	avctp_set_state(session, AVCTP_STATE_BROWSING_CONNECTED);
+	session->mtu_browsing = imtu;
+	session->browsing_id = g_io_add_watch(chan,
+				G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+				(GIOFunc) session_browsing_cb, session);
+
+	return;
+fail:
+	avctp_set_state(session, AVCTP_STATE_CONNECTED);
+	if(session->browsing) {
+		g_io_channel_unref(session->browsing);
+		session->browsing = NULL;
+	}
 }
 
 static void auth_cb(DBusError *derr, void *user_data)
@@ -941,6 +1108,40 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
 	return 0;
 }
 
+static int avctp_browsing_send(struct avctp *session, uint8_t transaction, 
+				uint8_t cr, uint8_t *operands, size_t operand_count)
+{
+	uint8_t *buf;
+	struct avctp_header *avctp;
+	uint8_t *pdu;
+	int sk, err = 0;
+	uint16_t size;
+
+	if (session->state != AVCTP_STATE_CONNECTED)
+		return -ENOTCONN;
+
+	sk = g_io_channel_unix_get_fd(session->io);
+	size = AVCTP_HEADER_LENGTH + operand_count;
+	buf = g_malloc0(size);
+
+	avctp = (void *) buf;
+	pdu = (void *) &buf[AVCTP_HEADER_LENGTH];
+
+	avctp->transaction = transaction;
+	avctp->packet_type = AVCTP_PACKET_SINGLE;
+	avctp->cr = cr;
+	avctp->pid = htons(AV_REMOTE_SVCLASS_ID);
+
+	memcpy(pdu, operands, operand_count);
+
+	if (write(sk, buf, size) < 0)
+		err = -errno;
+
+	g_free(buf);
+	DBG("Browsing send with id: %d", transaction);
+	return err;
+}
+
 static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
 				uint8_t code, uint8_t subunit, uint8_t opcode,
 				uint8_t *operands, size_t operand_count)
@@ -1006,6 +1207,33 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 	}
 
 	handler = g_new0(struct avctp_rsp_handler, 1);
+	handler->id = id;
+	handler->func = func;
+	handler->user_data = user_data;
+
+	session->handlers = g_slist_prepend(session->handlers, handler);
+	
+	id++;
+	id %= 16; //transaction id is only 4 bits
+
+	
+	return 0;
+}
+
+int avctp_send_browsing_req(struct avctp *session,
+				uint8_t *operands, size_t operand_count,
+				avctp_browsing_rsp_cb func, void *user_data)
+{
+	struct avctp_browsing_rsp_handler *handler;
+	int err;
+
+	err = avctp_browsing_send(session, id, AVCTP_COMMAND, operands, operand_count);
+	if (err < 0){
+		DBG("Browsing send error: %d",err);
+		return err;
+	}
+
+	handler = g_new0(struct avctp_browsing_rsp_handler, 1);
 	handler->id = id;
 	handler->func = func;
 	handler->user_data = user_data;
@@ -1116,9 +1344,44 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
 		return NULL;
 	}
 
+	session->initiator = true;
 	session->io = io;
 
 	return session;
+}
+
+int avctp_connect_browsing(struct avctp *session)
+{
+	GIOChannel *io;
+	GError *err = NULL;
+
+	if (session->state != AVCTP_STATE_CONNECTED)
+		return -ENOTCONN;
+
+	if (session->browsing != NULL)
+		return 0;
+		
+	avctp_set_state(session, AVCTP_STATE_BROWSING_CONNECTING);
+	
+	io = bt_io_connect(BT_IO_L2CAP, avctp_connect_browsing_cb, session, NULL, &err,
+				BT_IO_OPT_SOURCE_BDADDR, &session->server->src,
+				BT_IO_OPT_DEST_BDADDR, &session->dst,
+				BT_IO_OPT_PSM, AVCTP_BROWSING_PSM,
+				BT_IO_OPT_MODE, L2CAP_MODE_ERTM,
+				BT_IO_OPT_INVALID);
+	if (err) {
+		error("%s", err->message);
+		g_error_free(err);
+		return -EIO;
+	}
+	
+	session->browsing = io;
+	return 0;
+}
+
+bool avctp_is_initiator(struct avctp *session)
+{
+	return session->initiator;
 }
 
 void avctp_disconnect(struct avctp *session)

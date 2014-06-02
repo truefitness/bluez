@@ -113,6 +113,8 @@ enum battery_status {
 	BATTERY_STATUS_FULL_CHARGE =	4,
 };
 
+#define AVRCP_BROWSING_TIMEOUT		1
+
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 
 struct avrcp_header {
@@ -192,6 +194,7 @@ static uint32_t company_ids[] = {
 static void register_volume_notification(struct avrcp_player *player);
 static void avrcp_register_notification(struct control *con, uint8_t event);
 static void avrcp_get_element_attributes(struct control *con);
+static void avrcp_connect_browsing(struct avrcp_player *player);
 
 
 static sdp_record_t *avrcp_ct_record(void)
@@ -1233,6 +1236,9 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 	const sdp_record_t *rec;
 	sdp_list_t *list;
 	sdp_profile_desc_t *desc;
+	sdp_data_t *data;
+	
+	uint16_t features;
 
 	
 	server = find_server(servers, &dev->src);
@@ -1281,8 +1287,19 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		if (desc && desc->version >= 0x0104){
 			register_volume_notification(player);
 		}
+		
+		data = sdp_data_get(rec, SDP_ATTR_SUPPORTED_FEATURES);
+		features = data->val.uint16;
+		
+		if(desc && (features & AVRCP_FEATURE_BROWSING)){
+			/* TODO call avrcp_connect_browser here */
+			/* this expects avrcp struct as parameter */
+			avrcp_connect_browsing(player);
+		}
 
 		sdp_list_free(list, free);
+		return;
+		
 	default:
 		return;
 	}
@@ -1533,6 +1550,7 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
 	if (pdu == NULL || pdu->params[0] != CAP_EVENTS_SUPPORTED)
 		return FALSE;
 	DBG("get capabilities response");
+	/* TODO: Insert call to avctp_connect browsing here */
 	/* Connect browsing if pending */
 	/*
 	if (session->browsing_timer > 0) {
@@ -1599,6 +1617,40 @@ void avrcp_get_capabilities(struct control *con)
 					avrcp_get_capabilities_resp,
 					con);
 }
+#if 0
+static gboolean connect_browsing(gpointer user_data)
+{
+	struct avrcp *session = user_data;
+
+	session->browsing_timer = 0;
+
+	avctp_connect_browsing(session->conn);
+
+	return FALSE;
+}
+#endif
+
+static void avrcp_connect_browsing(struct avrcp_player *player)
+{
+	/* Immediately connect browsing channel if initiator otherwise delay
+	 * it to avoid possible collisions
+	 */
+	if (avctp_is_initiator(player->session)) {
+		avctp_connect_browsing(player->session);
+		return;
+	}
+
+	/* this gets done when this is not the initiator */
+	/* comment out for now */
+#if 0
+	if (session->browsing_timer > 0)
+		return;
+
+	session->browsing_timer = g_timeout_add_seconds(AVRCP_BROWSING_TIMEOUT,
+							connect_browsing,
+							session);
+#endif
+}
 
 static const char *metadata_to_str(uint32_t id)
 {
@@ -1623,7 +1675,7 @@ static const char *metadata_to_str(uint32_t id)
 }
 
 void set_metadata(struct control *con,
-				struct media_item *item, const char *key,
+				const char *key,
 				void *data, size_t len)
 {
 	char *value, *curval;
@@ -1668,7 +1720,7 @@ static void avrcp_parse_attribute_list(struct control *con,
 		if (charset == 106) {
 			const char *key = metadata_to_str(id);
 			if (key != NULL){
-				set_metadata(con, NULL,
+				set_metadata(con,
 							metadata_to_str(id),
 							&operands[i], len);
 			}
