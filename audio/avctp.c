@@ -1338,7 +1338,6 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
 
 	avctp_set_state(session, AVCTP_STATE_CONNECTING);
 
-	DBG("creating io");
 	io = bt_io_connect(BT_IO_L2CAP, avctp_connect_cb, session, NULL, &err,
 				BT_IO_OPT_SOURCE_BDADDR, &session->server->src,
 				BT_IO_OPT_DEST_BDADDR, &session->dst,
