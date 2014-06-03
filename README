@@ -1,49 +1,6 @@
-To build bluez
+## Debian Package Build Instructions ##
 
-clone the repository,  it contains three branches
-
-pristine-tar (with the xxx.orig.tar.gz) information
-upstream ( with the source code and no debian files)
-master (source code and debian packaging files)
-
-Current workflow would be to create a feature branch from upstream make the changes and then merge into a patch-queue to create the debian (quilt) patches. This will then be imported into master for packaging.
-
-
-
-
-
-
-Commit should be done in git as usual.
-
-Package building
-
-Merge changes from the feature branch into master and commit them.
-
-Snapshot release
-to make a snapshot (testing) release:
-update the debian changelog by running
-git-dch --snapshot
-               (If it complains about not finding a previous version, look at the git logs and see what was the latest commit prior to the changes in the snapshot and run)
-
-git-dch --snapshot --since <treeish>
-git add debian/changelog
-git commit -m "build"
-Build the package
-
-git-buildpackage --git-pristine-tar -uc -us
-
-Full Release
-
-update the debian changelog by running
-git-dch --release
-               (If it complains about not finding a previous version, look at the git logs and see what was the latest commit prior to the changes in the snapshot and run)
-
-git-dch --snapshot --since <treeish>
-
-It will do the build in ../build-dir which will help keep the git tree clean.
-
-Debian patches
-
+(See the wiki)
 
 
 
