@@ -1075,7 +1075,7 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
 	uint8_t *operands = &buf[AVCTP_HEADER_LENGTH + AVC_HEADER_LENGTH];
 	int sk;
 
-	if (session->state != AVCTP_STATE_CONNECTED)
+	if (!session->io)
 		return -ENOTCONN;
 
 	memset(buf, 0, sizeof(buf));
@@ -1123,7 +1123,7 @@ static int avctp_browsing_send(struct avctp *session, uint8_t transaction,
 	int sk, err = 0;
 	uint16_t size;
 
-	if (session->state != AVCTP_STATE_CONNECTED)
+	if (!session->browsing)
 		return -ENOTCONN;
 
 	sk = g_io_channel_unix_get_fd(session->io);
@@ -1159,7 +1159,7 @@ static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
 	int sk, err = 0;
 	uint16_t size;
 
-	if (session->state != AVCTP_STATE_CONNECTED)
+	if (!session->io)
 		return -ENOTCONN;
 
 	sk = g_io_channel_unix_get_fd(session->io);
