@@ -1126,7 +1126,7 @@ static int avctp_browsing_send(struct avctp *session, uint8_t transaction,
 	if (!session->browsing)
 		return -ENOTCONN;
 
-	sk = g_io_channel_unix_get_fd(session->io);
+	sk = g_io_channel_unix_get_fd(session->browsing);
 	size = AVCTP_HEADER_LENGTH + operand_count;
 	buf = g_malloc0(size);
 
