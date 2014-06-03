@@ -194,7 +194,7 @@ static uint32_t company_ids[] = {
 static void register_volume_notification(struct avrcp_player *player);
 static void avrcp_register_notification(struct control *con, uint8_t event);
 static void avrcp_get_element_attributes(struct control *con);
-static void avrcp_connect_browsing(struct avrcp_player *player);
+static void avrcp_connect_browsing(struct avctp *player);
 
 
 static sdp_record_t *avrcp_ct_record(void)
@@ -1245,12 +1245,13 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 	if (!server)
 		return;
 
-	player = server->active_player;
+/*	player = server->active_player;
 	if (!player)
 		return;
-
+*/
 	switch (new_state) {
 	case AVCTP_STATE_DISCONNECTED:
+	
 		player->session = NULL;
 		player->dev = NULL;
 		player->registered_events = 0;
@@ -1262,8 +1263,9 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 
 		break;
 	case AVCTP_STATE_CONNECTING:
-		DBG("new state: Connecting");
+		DBG("AVRCP Connecting");
 		//avrcp_get_capabilities(dev);
+/*
 		player->session = avctp_connect(&dev->src, &dev->dst);
 		player->dev = dev;
 
@@ -1272,9 +1274,11 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 							AVC_OP_VENDORDEP,
 							handle_vendordep_pdu,
 							player);
+*/
 		break;
 	case AVCTP_STATE_CONNECTED:
-		DBG("AVCTP Connected******************");
+		DBG("AVRCP Connected");
+		
 		rec = btd_device_get_record(dev->btd_dev, AVRCP_TARGET_UUID);
 		if (rec == NULL)
 			return;
@@ -1285,21 +1289,23 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		desc = list->data;
 
 		if (desc && desc->version >= 0x0104){
-			register_volume_notification(player);
+			DBG("Version is 1.4");
+			//register_volume_notification(player);
 		}
-		
+				
 		data = sdp_data_get(rec, SDP_ATTR_SUPPORTED_FEATURES);
 		features = data->val.uint16;
 		
 		if(desc && (features & AVRCP_FEATURE_BROWSING)){
 			/* TODO call avrcp_connect_browser here */
 			/* this expects avrcp struct as parameter */
-			avrcp_connect_browsing(player);
+			avrcp_connect_browsing(server->session);
 		}
-
 		sdp_list_free(list, free);
 		return;
 		
+	case AVCTP_STATE_BROWSING_CONNECTED:
+		return;
 	default:
 		return;
 	}
@@ -1316,13 +1322,19 @@ gboolean avrcp_connect(struct audio_device *dev)
 		DBG("Server not found");
 		return FALSE;
 	}
-
+			
+	DBG("Connecting to avrcp...");
 	session = avctp_connect(&dev->src, &dev->dst);
-	if (session){
+	if (!session){
 		DBG("Connecting to avrcp failed");
 		return FALSE;
 	}
-	DBG("Connecting to avrcp success...");
+	
+	if(session) {
+		DBG("Session assigned");
+		server->session = session;
+	}
+	
 	return TRUE;
 }
 
@@ -1396,6 +1408,11 @@ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
 	}
 
 	bacpy(&server->src, src);
+	
+	if (!avctp_id) {
+		DBG("Adding state_changed callback");
+		avctp_id = avctp_add_state_cb(state_changed, NULL);
+	}
 
 	servers = g_slist_append(servers, server);
 
@@ -1630,13 +1647,13 @@ static gboolean connect_browsing(gpointer user_data)
 }
 #endif
 
-static void avrcp_connect_browsing(struct avrcp_player *player)
+static void avrcp_connect_browsing(struct avctp *session)
 {
 	/* Immediately connect browsing channel if initiator otherwise delay
 	 * it to avoid possible collisions
 	 */
-	if (avctp_is_initiator(player->session)) {
-		avctp_connect_browsing(player->session);
+	if (avctp_is_initiator(session)) {
+		avctp_connect_browsing(session);
 		return;
 	}
 

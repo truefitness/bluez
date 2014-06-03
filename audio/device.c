@@ -156,8 +156,10 @@ static gboolean control_connect_timeout(gpointer user_data)
 
 	dev->priv->control_timer = 0;
 
-	if (dev->control)
+	if (dev->control){
+		DBG("Calling avcp_connect");
 		avrcp_connect(dev);
+	}
 
 	return FALSE;
 }
@@ -376,7 +378,10 @@ static void device_avdtp_cb(struct audio_device *dev, struct avdtp *session,
 		if (avdtp_stream_setup_active(session))
 			device_set_control_timer(dev);
 		else
+		{	
+			DBG("Calling avcp_connect");
 			avrcp_connect(dev);
+		}
 	}
 }
 
