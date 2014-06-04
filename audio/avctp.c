@@ -345,6 +345,12 @@ static void avctp_disconnected(struct avctp *session)
 		g_io_channel_unref(session->io);
 		session->io = NULL;
 	}
+	
+	if(session->browsing) {
+		g_io_channel_shutdown(session->browsing, TRUE, NULL);
+		g_io_channel_unref(session->browsing);
+		session->browsing = NULL;
+	}
 
 	if (session->io_id) {
 		g_source_remove(session->io_id);
@@ -358,6 +364,11 @@ static void avctp_disconnected(struct avctp *session)
 			audio_device_cancel_authorization(dev, auth_cb,
 								session);
 		}
+	}
+	
+	if(session->browsing_id) {
+		g_source_remove(session->browsing_id);
+		session->browsing_id = 0;
 	}
 
 	if (session->uinput >= 0) {
@@ -597,7 +608,7 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
 		goto failed;
 
-	sock = g_io_channel_unix_get_fd(session->io);
+	sock = g_io_channel_unix_get_fd(session->browsing);
 
 	ret = read(sock, buf, sizeof(buf));
 	if (ret <= 0)
@@ -618,8 +629,8 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
 
 	if (avctp->cr == AVCTP_RESPONSE) {
 		/* 
-		 * This gets in response to browsing commands that originated from
-		 * here.
+		 * This gets the packet in response to browsing commands that 
+		 * originated from here.
 		 */
 		browsing_response(session, avctp, operands, operand_count);
 		return TRUE;
