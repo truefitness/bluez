@@ -67,6 +67,12 @@
 #define E_INVALID_PARAM		0x01
 #define E_PARAM_NOT_FOUND	0x02
 #define E_INTERNAL		0x03
+#define AVRCP_STATUS_SUCCESS 					0x04
+#define AVRCP_STATUS_OUT_OF_BOUNDS 				0x0B
+#define AVRCP_STATUS_INVALID_PLAYER_ID 			0x11
+#define AVRCP_STATUS_PLAYER_NOT_BROWSABLE 		0x12
+#define AVRCP_STATUS_NO_AVAILABLE_PLAYERS 		0x15
+#define AVRCP_STATUS_ADDRESSED_PLAYER_CHANGED 	0x16
 
 /* Packet types */
 #define AVRCP_PACKET_TYPE_SINGLE	0x00
@@ -90,6 +96,15 @@
 #define AVRCP_REQUEST_CONTINUING	0x40
 #define AVRCP_ABORT_CONTINUING		0x41
 #define AVRCP_SET_ABSOLUTE_VOLUME	0x50
+#define AVRCP_SET_BROWSED_PLAYER	0x70
+#define AVRCP_GET_FOLDER_ITEMS		0x71
+#define AVRCP_CHANGE_PATH			0x72
+#define AVRCP_GET_ITEM_ATTRIBUTES	0x73
+#define AVRCP_PLAY_ITEM				0x74
+#define AVRCP_SEARCH				0x80
+#define AVRCP_ADD_TO_NOW_PLAYING	0x90
+#define AVRCP_GENERAL_REJECT		0xA0
+
 
 /* Capabilities for AVRCP_GET_CAPABILITIES pdu */
 #define CAP_COMPANY_ID		0x02
@@ -145,6 +160,13 @@ struct avrcp_header {
 
 #define AVRCP_MTU	(AVC_MTU - AVC_HEADER_LENGTH)
 #define AVRCP_PDU_MTU	(AVRCP_MTU - AVRCP_HEADER_LENGTH)
+
+struct avrcp_browsing_header {
+	uint8_t pdu_id;
+	uint16_t param_len;
+	uint8_t params[0];
+} __attribute__ ((packed));
+#define AVRCP_BROWSING_HEADER_LENGTH 3
 
 struct avrcp_server {
 	bdaddr_t src;
@@ -1592,7 +1614,7 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
 		case AVRCP_EVENT_STATUS_CHANGED:
 		case AVRCP_EVENT_TRACK_CHANGED:
 		//case AVRCP_EVENT_SETTINGS_CHANGED:
-		//case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
+		case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
 		//case AVRCP_EVENT_UIDS_CHANGED:
 		//case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
 		//case AVRCP_EVENT_VOLUME_CHANGED:
@@ -1839,6 +1861,154 @@ static const char *status_to_string(uint8_t status)
 	}
 }
 
+static const char *type_to_string(uint8_t type)
+{
+	switch(type & 0x0F) {
+		case 0x01:
+			return "Audio";
+		case 0x02:
+			return "Video";
+		case 0x03:
+			return "Audio, Video";
+		case 0x04:
+			return "Audio Broadcasting";
+		case 0x05:
+			return "Audio, Audio Broadcasting";
+		case 0x06:
+			return "Video, Audio Broadcasting";
+		case 0x07:
+			return "Audio, Video, Audio Broadcasting";
+		case 0x08:
+			return "Video Broadcasting";
+		case 0x09:
+			return "Audio, Video Broadcasting";
+		case 0x0A:
+			return "Video, Video Broadcasting";
+		case 0x0B:
+			return "Audio, Video, Video Broadcasting";
+		case 0x0C:
+			return "Audio Broadcasting, Video Broadcasting";
+		case 0x0D:
+			return "Audio, Audio Broadcasting, Video Broadcasting";
+		case 0x0E:
+			return "Video, Audio Broadcasting, Video Broadcasting";
+		case 0x0F:
+			return "Audio, Video, Audio Broadcasting, Video Broadcasting";
+			
+	}
+	return "None";
+}
+
+static const char *subtype_to_string(uint32_t subtype)
+{
+	switch (subtype & 0x03) {
+		case 0x01:
+			return "Audio Book";
+		case 0x02:
+			return "Podcast";
+		case 0x03:
+			return "Audio Book, Podcast";
+	}
+	return "None";
+}
+
+static void avrcp_parse_media_player_item(void * reserved, 
+						uint8_t *operands, uint16_t len)
+{
+	uint16_t id, namelen;
+	uint32_t subtype;
+	const char *curval, *strval;
+	char name[255];
+	/* 
+	 * 28 is the number of bytes for the Media Player Item attribute. 
+	 * See 6.10.2.1 of the AVRCP 1.4 specification document.
+	 */
+	if(len < 28)
+		return;
+	
+	id = bt_get_be16(&operands[0]);
+	DBG("Media player ID: %d",id);
+	
+	DBG("Media player type: %s", type_to_string(operands[2]));
+	
+	subtype = bt_get_be32(&operands[3]);
+	DBG("Media player subtype: %s", subtype_to_string(subtype));
+	
+	namelen = bt_get_be16(&operands[26]);
+	if(namelen > 0 && namelen + 28 == len) {
+		namelen = MIN(namelen, sizeof(name) - 1);
+		memcpy(name, &operands[28], namelen);
+		name[namelen] = '\0';
+		DBG("Media player name: %s", name);
+	}
+	
+	
+}
+
+static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn, 
+						uint8_t *operands,
+						size_t operand_count,
+						void *user_data)
+{
+	struct avrcp_browsing_header *pdu = (void *) operands;
+	struct avctp * session = user_data;
+	uint16_t count;
+	size_t i;
+	
+	if(pdu == NULL || pdu->params[0] != AVRCP_STATUS_SUCCESS || operand_count < 5) {
+		return FALSE;
+	}
+	
+	count = bt_get_be16(&operands[6]);
+	
+	for(i = 8; count && i < operand_count; count--) {
+		uint8_t type;
+		uint16_t len;
+		
+		type = operands[i++];
+		len = bt_get_be16(&operands[i]);;
+		i += 2;
+		
+		if(type != 0x01) {
+			i+= len;
+			continue;
+		}
+		
+		if(i + len > operand_count) {
+			error("Invalid player item length");
+			return FALSE;
+		}
+		
+		DBG("Perform parsing here!");
+		avrcp_parse_media_player_item(NULL, &operands[i], len);
+		
+		i+= len;
+		
+	}
+	
+	DBG("Reply received!!!");
+	
+	return TRUE;
+}
+
+static void avrcp_get_media_player_list(struct avctp *session)
+{
+	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 10];
+	struct avrcp_browsing_header *pdu = (void *) buf;
+	
+	memset(buf, 0, sizeof(buf));
+	
+	pdu->pdu_id = AVRCP_GET_FOLDER_ITEMS;
+	pdu->param_len = htons(10);
+	avctp_send_browsing_req(session,buf, sizeof(buf),avrcp_get_media_player_list_rsp,session);
+}
+
+static void avrcp_addressed_player_changed(struct avctp *session)
+{
+		avrcp_get_media_player_list(session);
+}
+					
+
 static gboolean avrcp_handle_event(struct avctp *conn,
 					uint8_t code, uint8_t subunit,
 					uint8_t *operands, size_t operand_count,
@@ -1862,6 +2032,9 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 			avrcp_register_notification(session, event);
 			break;
 			case AVRCP_EVENT_STATUS_CHANGED:
+			avrcp_register_notification(session, event);
+			break;
+			case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
 			avrcp_register_notification(session, event);
 			break;
 		}
@@ -1892,7 +2065,8 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 		//avrcp_available_players_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
-		//avrcp_addressed_player_changed(session, pdu);
+		DBG("AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED"); 
+		avrcp_addressed_player_changed(conn);
 		break;
 	case AVRCP_EVENT_UIDS_CHANGED:
 		//avrcp_uids_changed(session, pdu);
