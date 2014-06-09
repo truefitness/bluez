@@ -72,6 +72,7 @@ noinst_PROGRAMS = $(am__EXEEXT_8) $(am__EXEEXT_9) $(am__EXEEXT_10) \
 @AUDIOPLUGIN_TRUE@			audio/unix.h audio/unix.c \
 @AUDIOPLUGIN_TRUE@			audio/media.h audio/media.c \
 @AUDIOPLUGIN_TRUE@			audio/transport.h audio/transport.c \
+@AUDIOPLUGIN_TRUE@			audio/player.h audio/player.c \
 @AUDIOPLUGIN_TRUE@			audio/telephony.h audio/a2dp-codecs.h
 
 @AUDIOPLUGIN_TRUE@am__append_9 = audio/telephony.c
@@ -522,12 +523,12 @@ am__src_bluetoothd_SOURCES_DIST = gdbus/gdbus.h gdbus/mainloop.c \
 	audio/a2dp.h audio/a2dp.c audio/avdtp.h audio/avdtp.c \
 	audio/ipc.h audio/ipc.c audio/unix.h audio/unix.c \
 	audio/media.h audio/media.c audio/transport.h \
-	audio/transport.c audio/telephony.h audio/a2dp-codecs.h \
-	sap/main.c sap/manager.h sap/manager.c sap/server.h \
-	sap/server.c sap/sap.h input/main.c input/manager.h \
-	input/manager.c input/server.h input/server.c input/device.h \
-	input/device.c input/fakehid.c input/fakehid.h serial/main.c \
-	serial/manager.h serial/manager.c serial/proxy.h \
+	audio/transport.c audio/player.h audio/player.c \
+	audio/telephony.h audio/a2dp-codecs.h sap/main.c sap/manager.h \
+	sap/manager.c sap/server.h sap/server.c sap/sap.h input/main.c \
+	input/manager.h input/manager.c input/server.h input/server.c \
+	input/device.h input/device.c input/fakehid.c input/fakehid.h \
+	serial/main.c serial/manager.h serial/manager.c serial/proxy.h \
 	serial/proxy.c serial/port.h serial/port.c network/main.c \
 	network/manager.h network/manager.c network/common.h \
 	network/common.c network/server.h network/server.c \
@@ -586,7 +587,8 @@ am__objects_4 = gdbus/bluetoothd-mainloop.$(OBJEXT) \
 @AUDIOPLUGIN_TRUE@	audio/bluetoothd-ipc.$(OBJEXT) \
 @AUDIOPLUGIN_TRUE@	audio/bluetoothd-unix.$(OBJEXT) \
 @AUDIOPLUGIN_TRUE@	audio/bluetoothd-media.$(OBJEXT) \
-@AUDIOPLUGIN_TRUE@	audio/bluetoothd-transport.$(OBJEXT)
+@AUDIOPLUGIN_TRUE@	audio/bluetoothd-transport.$(OBJEXT) \
+@AUDIOPLUGIN_TRUE@	audio/bluetoothd-player.$(OBJEXT)
 @SAPPLUGIN_TRUE@am__objects_7 = sap/bluetoothd-main.$(OBJEXT) \
 @SAPPLUGIN_TRUE@	sap/bluetoothd-manager.$(OBJEXT) \
 @SAPPLUGIN_TRUE@	sap/bluetoothd-server.$(OBJEXT)
@@ -998,6 +1000,7 @@ am__distuninstallcheck_listfiles = $(distuninstallcheck_listfiles) \
 distcleancheck_listfiles = find . -type f -print
 ACLOCAL = @ACLOCAL@
 ALSA_CFLAGS = @ALSA_CFLAGS@
+ALSA_LIBDIR = @ALSA_LIBDIR@
 ALSA_LIBS = @ALSA_LIBS@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
@@ -1301,7 +1304,7 @@ src_bluetoothd_SHORTNAME = bluetoothd
 builtin_files = src/builtin.h $(builtin_nodist)
 nodist_src_bluetoothd_SOURCES = $(builtin_files)
 man_MANS = src/bluetoothd.8
-@ALSA_TRUE@alsadir = $(libdir)/alsa-lib
+@ALSA_TRUE@alsadir = $(ALSA_LIBDIR)/alsa-lib
 @ALSA_TRUE@alsa_LTLIBRARIES = audio/libasound_module_pcm_bluetooth.la \
 @ALSA_TRUE@				audio/libasound_module_ctl_bluetooth.la
 
@@ -2179,6 +2182,8 @@ audio/bluetoothd-media.$(OBJEXT): audio/$(am__dirstamp) \
 	audio/$(DEPDIR)/$(am__dirstamp)
 audio/bluetoothd-transport.$(OBJEXT): audio/$(am__dirstamp) \
 	audio/$(DEPDIR)/$(am__dirstamp)
+audio/bluetoothd-player.$(OBJEXT): audio/$(am__dirstamp) \
+	audio/$(DEPDIR)/$(am__dirstamp)
 sap/bluetoothd-main.$(OBJEXT): sap/$(am__dirstamp) \
 	sap/$(DEPDIR)/$(am__dirstamp)
 sap/bluetoothd-manager.$(OBJEXT): sap/$(am__dirstamp) \
@@ -2722,6 +2727,7 @@ mostlyclean-compile:
 	-rm -f audio/bluetoothd-main.$(OBJEXT)
 	-rm -f audio/bluetoothd-manager.$(OBJEXT)
 	-rm -f audio/bluetoothd-media.$(OBJEXT)
+	-rm -f audio/bluetoothd-player.$(OBJEXT)
 	-rm -f audio/bluetoothd-sink.$(OBJEXT)
 	-rm -f audio/bluetoothd-source.$(OBJEXT)
 	-rm -f audio/bluetoothd-telephony.$(OBJEXT)
@@ -2967,6 +2973,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-main.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-manager.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-media.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-player.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-sink.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-source.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@audio/$(DEPDIR)/bluetoothd-telephony.Po@am__quote@
@@ -3617,6 +3624,20 @@ audio/bluetoothd-transport.obj: audio/transport.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='audio/transport.c' object='audio/bluetoothd-transport.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -c -o audio/bluetoothd-transport.obj `if test -f 'audio/transport.c'; then $(CYGPATH_W) 'audio/transport.c'; else $(CYGPATH_W) '$(srcdir)/audio/transport.c'; fi`
+
+audio/bluetoothd-player.o: audio/player.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -MT audio/bluetoothd-player.o -MD -MP -MF audio/$(DEPDIR)/bluetoothd-player.Tpo -c -o audio/bluetoothd-player.o `test -f 'audio/player.c' || echo '$(srcdir)/'`audio/player.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) audio/$(DEPDIR)/bluetoothd-player.Tpo audio/$(DEPDIR)/bluetoothd-player.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='audio/player.c' object='audio/bluetoothd-player.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -c -o audio/bluetoothd-player.o `test -f 'audio/player.c' || echo '$(srcdir)/'`audio/player.c
+
+audio/bluetoothd-player.obj: audio/player.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -MT audio/bluetoothd-player.obj -MD -MP -MF audio/$(DEPDIR)/bluetoothd-player.Tpo -c -o audio/bluetoothd-player.obj `if test -f 'audio/player.c'; then $(CYGPATH_W) 'audio/player.c'; else $(CYGPATH_W) '$(srcdir)/audio/player.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) audio/$(DEPDIR)/bluetoothd-player.Tpo audio/$(DEPDIR)/bluetoothd-player.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='audio/player.c' object='audio/bluetoothd-player.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -c -o audio/bluetoothd-player.obj `if test -f 'audio/player.c'; then $(CYGPATH_W) 'audio/player.c'; else $(CYGPATH_W) '$(srcdir)/audio/player.c'; fi`
 
 sap/bluetoothd-main.o: sap/main.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(src_bluetoothd_CFLAGS) $(CFLAGS) -MT sap/bluetoothd-main.o -MD -MP -MF sap/$(DEPDIR)/bluetoothd-main.Tpo -c -o sap/bluetoothd-main.o `test -f 'sap/main.c' || echo '$(srcdir)/'`sap/main.c
