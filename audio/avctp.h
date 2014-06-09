@@ -110,3 +110,6 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 					uint8_t subunit, uint8_t *operands,
 					size_t operand_count,
 					avctp_rsp_cb func, void *user_data);
+
+const bdaddr_t * avctp_get_dest(struct avctp *session);
+const bdaddr_t * avctp_get_src(struct avctp *session);

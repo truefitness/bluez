@@ -59,6 +59,7 @@
 #include "sdpd.h"
 #include "dbus-common.h"
 #include "control.h"
+#include "player.h"
 
 /* Company IDs for vendor dependent commands */
 #define IEEEID_BTSIG		0x001958
@@ -174,8 +175,9 @@ struct avrcp_server {
 	uint32_t tg_record_id;
 	uint32_t ct_record_id;
 	GSList *players;
+	GSList *media_players;
 	struct avrcp_player *active_player;
-	struct avrcp_player *ct_player;
+	struct avrcp_player *ct_player; /* this will be active player now*/
 	struct avctp *session;
 	unsigned int browsing_timer;
 };
@@ -199,12 +201,10 @@ struct avrcp_player {
 	struct avrcp_player_cb *cb;
 	void *user_data;
 	GDestroyNotify destroy;
-};
-
-struct avrcp_media_player {
 	uint16_t id;
 	bool browsable;
-}avrcp_media_player;
+	uint8_t *features;
+};
 
 struct avrcp_state_callback {
 	avrcp_state_cb cb;
@@ -1390,6 +1390,18 @@ void avrcp_disconnect(struct audio_device *dev)
 
 	avctp_disconnect(session);
 }
+/*
+static struct avrcp_player_cb ct_player_cb = {
+	.get_setting = ct_get_setting,
+	.set_setting = ct_set_setting,
+	.list_metadata = ct_list_metadata,
+	.get_uid = ct_get_uid,
+	.get_metadata = ct_get_metadata,
+	.get_position = ct_get_position,
+	.get_status = ct_get_status,
+	.set_volume = ct_set_volume
+};
+*/
 
 int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
 {
@@ -1453,6 +1465,7 @@ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
 	
 	if(server->ct_record_id){
 		DBG("TODO Create controller player");
+		//avrcp_register_player(server->src, &ct_player_cb, server, NULL);
 		
 	}
 	
@@ -1924,7 +1937,7 @@ static const char *subtype_to_string(uint32_t subtype)
 	return "None";
 }
 
-static void avrcp_player_parse_features(struct avrcp_media_player *player, uint8_t * features)
+static void avrcp_player_parse_features(struct avrcp_player *player, uint8_t * features)
 {
 	if (features[7] & 0x08) {
 		DBG("Media player browsable is supported");
@@ -1940,13 +1953,12 @@ static void avrcp_player_parse_features(struct avrcp_media_player *player, uint8
 	}
 }
 
-static void *parse_media_folder(struct avctp *session,
+static void *parse_media_folder(struct avrcp_server *server,
 					uint8_t *operands, uint16_t len)
 {
-	//struct avrcp_player *player = session->controller->player;
-	//struct media_player *mp = player->user_data;
-	//struct media_item *item;
-	void * item;
+	struct avrcp_player *player = server->ct_player;
+	struct media_player *mp = player->user_data;
+	struct media_item *item;
 	uint16_t namelen;
 	char name[255];
 	uint64_t uid;
@@ -1967,7 +1979,9 @@ static void *parse_media_folder(struct avctp *session,
 		DBG("Folder item (%08llu): %s",uid, name);
 	}
 	item = NULL;
-	//item = media_player_create_folder(mp, name, type, uid);
+	DBG("mp: %p", mp);
+	DBG("uid: %llu", uid);
+	item = media_player_create_folder(mp, name, type, uid);
 	if (!item)
 		return NULL;
 
@@ -1981,7 +1995,7 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
 {
 	struct avrcp_browsing_header *pdu = (void *) operands;
 	struct avctp *session = user_data;
-	//struct avrcp_player *player = session->controller->player;
+	struct avrcp_server *server;
 	//struct pending_list_items *p = player->p;
 	uint16_t count;
 	uint32_t items, total;
@@ -2009,6 +2023,12 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
 	count = bt_get_be16(&operands[6]);
 	if (count == 0)
 		goto done;
+		
+	/* get server here */	
+	server = find_server(servers, avctp_get_src(session));
+	if(!server){
+		goto done;
+	}
 
 	for (i = 8; count && i + 3 < operand_count; count--) {
 		struct media_item *item;
@@ -2033,7 +2053,7 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
 			DBG("Media element found");
 			//item = parse_media_element(session, &operands[i], len);
 		else
-			item = parse_media_folder(session, &operands[i], len);
+			item = parse_media_folder(server, &operands[i], len);
 
 		//if (item) {
 		//	if (g_slist_find(p->items, item))
@@ -2094,6 +2114,19 @@ static void avrcp_list_items(struct avctp *session, uint32_t start,
 					avrcp_list_items_rsp, session);
 }
 
+static const char * avrcp_status_to_str(uint8_t status)
+{
+	switch(status){
+		case AVRCP_STATUS_SUCCESS: return "AVRCP_STATUS_SUCCESS";
+		case AVRCP_STATUS_OUT_OF_BOUNDS: return "AVRCP_STATUS_OUT_OF_BOUNDS";
+		case AVRCP_STATUS_INVALID_PLAYER_ID: return "AVRCP_STATUS_INVALID_PLAYER_ID";	
+		case AVRCP_STATUS_PLAYER_NOT_BROWSABLE: return "AVRCP_STATUS_PLAYER_NOT_BROWSABLE";
+		case AVRCP_STATUS_NO_AVAILABLE_PLAYERS: return "AVRCP_STATUS_NO_AVAILABLE_PLAYERS";
+		case AVRCP_STATUS_ADDRESSED_PLAYER_CHANGED: return "AVRCP_STATUS_ADDRESSED_PLAYER_CHANGED";
+		default: return "Unknown Error";
+	}
+}
+
 static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
 						uint8_t *operands,
 						size_t operand_count,
@@ -2108,8 +2141,10 @@ static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
 	char name[255];
 
 	if (pdu == NULL || pdu->params[0] != AVRCP_STATUS_SUCCESS ||
-							operand_count < 13)
+							operand_count < 13){
+		DBG("Set Browsed error: %s", avrcp_status_to_str(pdu->params[0]));						
 		return FALSE;
+	}
 
 	DBG("Set Browsed reply received");
 	items = bt_get_be32(&pdu->params[3]);
@@ -2144,7 +2179,7 @@ static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
 }
 
 static void avrcp_set_browsed_player(struct avctp *session,
-						struct avrcp_media_player *player)
+						struct avrcp_player *player)
 {
 	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 2];
 	struct avrcp_browsing_header *pdu = (void *) buf;
@@ -2161,9 +2196,95 @@ static void avrcp_set_browsed_player(struct avctp *session,
 				avrcp_set_browsed_player_rsp, session);
 }
 
-static void avrcp_parse_media_player_item(struct avrcp_media_player *player, 
+static const struct media_player_callback ct_cbs = {
+/*	.set_setting	= ct_set_setting,
+	.play		= ct_play,
+	.pause		= ct_pause,
+	.stop		= ct_stop,
+	.next		= ct_next,
+	.previous	= ct_previous,
+	.fast_forward	= ct_fast_forward,
+	.rewind		= ct_rewind,
+	.list_items	= ct_list_items,
+	.change_folder	= ct_change_folder,
+	.search		= ct_search,
+	.play_item	= ct_play_item,
+	.add_to_nowplaying = ct_add_to_nowplaying,*/
+	.set_setting	= NULL,
+	.play		= NULL,
+	.pause		= NULL,
+	.stop		= NULL,
+	.next		= NULL,
+	.previous	= NULL,
+	.fast_forward	= NULL,
+	.rewind		= NULL,
+	.list_items	= NULL,
+	.change_folder	= NULL,
+	.search		= NULL,
+	.play_item	= NULL,
+	.add_to_nowplaying = NULL
+};
+
+static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+								uint16_t id)
+{
+	struct avrcp_player *player;
+	struct media_player *mp;
+	struct audio_device *dev;
+	const char *path;
+
+	player = g_new0(struct avrcp_player, 1);
+	//player->sessions = g_slist_prepend(player->sessions, session);
+
+	dev = manager_get_device(&server->src, avctp_get_dest(server->session), FALSE);
+
+	path = dev->path;
+	
+	DBG("path: %s", path);
+
+	mp = media_player_controller_create(path, id);
+	if (mp == NULL)
+		return NULL;
+
+	media_player_set_callbacks(mp, &ct_cbs, player);
+	player->user_data = mp;
+	player->destroy = (GDestroyNotify) media_player_destroy;
+
+	if (server->ct_player == NULL){
+		DBG("Set ct_player: %p", player);
+		server->ct_player = player;
+	}
+
+	server->players = g_slist_prepend(
+						server->players,
+						player);
+
+	return server->ct_player;
+}
+
+static struct avrcp_player *find_ct_player(struct avrcp_server *server, uint16_t id)
+{
+	GSList *l;
+
+	for (l = server->players; l; l = l->next) {
+		struct avrcp_player *player = l->data;
+
+		if (player->id == 0) {
+			player->id = id;
+			return player;
+		}
+
+		if (player->id == id)
+			return player;
+	}
+
+	return NULL;
+}
+
+static struct avrcp_player * avrcp_parse_media_player_item(struct avrcp_server *server, 
 						uint8_t *operands, uint16_t len)
 {
+	struct avrcp_player *player;
 	uint16_t id, namelen;
 	uint32_t subtype;
 	const char *curval, *strval;
@@ -2177,6 +2298,17 @@ static void avrcp_parse_media_player_item(struct avrcp_media_player *player,
 	
 	id = bt_get_be16(&operands[0]);
 	DBG("Media player ID: %d",id);
+	
+	/* Find media player */
+	player = find_ct_player(server, id);
+	if (player == NULL) {
+		DBG("Creating player");
+		player = create_ct_player(server, id);
+		if (player == NULL)
+			return NULL;
+	} else if (player->features != NULL)
+		return player;
+		
 	player->id = id;
 	
 	DBG("Media player type: %s", type_to_string(operands[2]));
@@ -2198,6 +2330,8 @@ static void avrcp_parse_media_player_item(struct avrcp_media_player *player,
 		name[namelen] = '\0';
 		DBG("Media player name: %s", name);
 	}
+	
+	return player;
 }
 
 static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn, 
@@ -2206,7 +2340,8 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 						void *user_data)
 {
 	struct avrcp_browsing_header *pdu = (void *) operands;
-	struct avctp * session = user_data;
+	struct avrcp_server * server = user_data;
+	struct avrcp_player * player;
 	uint16_t count;
 	size_t i;
 	
@@ -2235,11 +2370,11 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 		}
 		
 		DBG("Perform parsing here!");
-		avrcp_parse_media_player_item(&avrcp_media_player, &operands[i], len);
+		player = avrcp_parse_media_player_item(server, &operands[i], len);
 		
-		if(avrcp_media_player.browsable == true){
+		if(server->ct_player->browsable == true){
 			DBG("Set browsed player here");
-			avrcp_set_browsed_player(conn, &avrcp_media_player);
+			avrcp_set_browsed_player(conn, server->ct_player);
 		}
 		
 		i+= len;
@@ -2249,7 +2384,7 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 	return TRUE;
 }
 
-static void avrcp_get_media_player_list(struct avctp *session)
+static void avrcp_get_media_player_list(struct avrcp_server *server)
 {
 	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 10];
 	struct avrcp_browsing_header *pdu = (void *) buf;
@@ -2258,12 +2393,18 @@ static void avrcp_get_media_player_list(struct avctp *session)
 	
 	pdu->pdu_id = AVRCP_GET_FOLDER_ITEMS;
 	pdu->param_len = htons(10);
-	avctp_send_browsing_req(session,buf, sizeof(buf),avrcp_get_media_player_list_rsp,session);
+	avctp_send_browsing_req(server->session,buf, sizeof(buf),avrcp_get_media_player_list_rsp,server);
 }
 
 static void avrcp_addressed_player_changed(struct avctp *session)
 {
-		avrcp_get_media_player_list(session);
+	struct avrcp_server * server;
+	server = find_server(servers, avctp_get_src(session));
+	
+	if(!server)
+		return;
+	
+	avrcp_get_media_player_list(server);
 }
 					
 

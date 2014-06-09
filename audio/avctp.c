@@ -1413,3 +1413,14 @@ struct avctp *avctp_get(const bdaddr_t *src, const bdaddr_t *dst)
 {
 	return avctp_get_internal(src, dst);
 }
+
+const bdaddr_t * avctp_get_dest(struct avctp *session)
+{
+	return &session->dst;
+}
+
+
+const bdaddr_t * avctp_get_src(struct avctp *session)
+{
+	return &session->server->src;
+}

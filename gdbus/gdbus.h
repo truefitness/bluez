@@ -31,6 +31,12 @@ extern "C" {
 #include <dbus/dbus.h>
 #include <glib.h>
 
+typedef struct GDBusArgInfo GDBusArgInfo;
+typedef struct GDBusMethodTable GDBusMethodTable;
+typedef struct GDBusSignalTable GDBusSignalTable;
+typedef struct GDBusPropertyTable GDBusPropertyTable;
+typedef struct GDBusSecurityTable GDBusSecurityTable;
+
 typedef void (* GDBusWatchFunction) (DBusConnection *connection,
 							void *user_data);
 
@@ -55,6 +61,18 @@ typedef void (* GDBusDestroyFunction) (void *user_data);
 typedef DBusMessage * (* GDBusMethodFunction) (DBusConnection *connection,
 					DBusMessage *message, void *user_data);
 
+typedef gboolean (*GDBusPropertyGetter)(const GDBusPropertyTable *property,
+					DBusMessageIter *iter, void *data);
+
+typedef guint32 GDBusPendingPropertySet;
+
+typedef void (*GDBusPropertySetter)(const GDBusPropertyTable *property,
+			DBusMessageIter *value, GDBusPendingPropertySet id,
+			void *data);
+
+typedef gboolean (*GDBusPropertyExists)(const GDBusPropertyTable *property,
+								void *data);
+
 typedef guint32 GDBusPendingReply;
 
 typedef void (* GDBusSecurityFunction) (DBusConnection *connection,
@@ -73,7 +91,8 @@ typedef enum {
 } GDBusSignalFlags;
 
 typedef enum {
-	G_DBUS_PROPERTY_FLAG_DEPRECATED = (1 << 0),
+	G_DBUS_PROPERTY_FLAG_DEPRECATED   = (1 << 0),
+	G_DBUS_PROPERTY_FLAG_EXPERIMENTAL = (1 << 1),
 } GDBusPropertyFlags;
 
 typedef enum {
@@ -82,38 +101,41 @@ typedef enum {
 	G_DBUS_SECURITY_FLAG_ALLOW_INTERACTION = (1 << 2),
 } GDBusSecurityFlags;
 
-typedef struct {
+struct GDBusArgInfo{
 	const char *name;
 	const char *signature;
-} GDBusArgInfo;
+};
 
-typedef struct {
+struct GDBusMethodTable{
 	const char *name;
 	GDBusMethodFunction function;
 	GDBusMethodFlags flags;
 	unsigned int privilege;
 	const GDBusArgInfo *in_args;
 	const GDBusArgInfo *out_args;
-} GDBusMethodTable;
+};
 
-typedef struct {
+struct GDBusSignalTable{
 	const char *name;
 	GDBusSignalFlags flags;
 	const GDBusArgInfo *args;
-} GDBusSignalTable;
+};
 
-typedef struct {
+struct GDBusPropertyTable{
 	const char *name;
 	const char *type;
+	GDBusPropertyGetter get;
+	GDBusPropertySetter set;
+	GDBusPropertyExists exists;
 	GDBusPropertyFlags flags;
-} GDBusPropertyTable;
+};
 
-typedef struct {
+struct GDBusSecurityTable{
 	unsigned int privilege;
 	const char *action;
 	GDBusSecurityFlags flags;
 	GDBusSecurityFunction function;
-} GDBusSecurityTable;
+};
 
 #define GDBUS_ARGS(args...) (const GDBusArgInfo[]) { args, { } }
 
@@ -204,6 +226,16 @@ gboolean g_dbus_emit_signal(DBusConnection *connection,
 gboolean g_dbus_emit_signal_valist(DBusConnection *connection,
 				const char *path, const char *interface,
 				const char *name, int type, va_list args);
+void g_dbus_pending_property_success(GDBusPendingPropertySet id);
+void g_dbus_pending_property_error_valist(GDBusPendingReply id,
+				const char *name, const char *format, va_list args);
+void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
+				const char *format, ...);
+void g_dbus_emit_property_changed(DBusConnection *connection,
+				const char *path, const char *interface,
+				const char *name);
+gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
+				const char *interface, DBusMessageIter *iter);
 
 guint g_dbus_add_service_watch(DBusConnection *connection, const char *name,
 				GDBusWatchFunction connect,
@@ -217,6 +249,7 @@ guint g_dbus_add_signal_watch(DBusConnection *connection,
 				const char *interface, const char *member,
 				GDBusSignalFunction function, void *user_data,
 				GDBusDestroyFunction destroy);
+				
 gboolean g_dbus_remove_watch(DBusConnection *connection, guint tag);
 void g_dbus_remove_all_watches(DBusConnection *connection);
 
