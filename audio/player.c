@@ -950,13 +950,12 @@ cleanup:
 done:
 	mp->scope = folder;
 	
-/* TODO emit property change here */
-/*
+
 	g_dbus_emit_property_changed(get_dbus_connection(), mp->path,
 				MEDIA_FOLDER_INTERFACE, "Name");
 	g_dbus_emit_property_changed(get_dbus_connection(), mp->path,
 				MEDIA_FOLDER_INTERFACE, "NumberOfItems");
-*/
+
 }
 
 static struct media_folder *find_folder(GSList *folders, const char *pattern)
@@ -1687,18 +1686,12 @@ static const GDBusMethodTable media_item_methods[] = {
 };
 
 static const GDBusPropertyTable media_item_properties[] = {
-	{ "Player", "o", get_player, NULL, NULL,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Name", "s", get_item_name, NULL, item_name_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Type", "s", get_item_type, NULL, NULL,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "FolderType", "s", get_folder_type, NULL, folder_type_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Playable", "b", get_playable, NULL, NULL,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Metadata", "a{sv}", get_metadata, NULL, metadata_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
+	{ "Player", "o", get_player, NULL, NULL },
+	{ "Name", "s", get_item_name, NULL, item_name_exists },
+	{ "Type", "s", get_item_type, NULL, NULL },
+	{ "FolderType", "s", get_folder_type, NULL, folder_type_exists },
+	{ "Playable", "b", get_playable, NULL, NULL },
+	{ "Metadata", "a{sv}", get_metadata, NULL, metadata_exists },
 	{ }
 };
 

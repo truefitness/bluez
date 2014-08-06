@@ -184,9 +184,19 @@ static inline uint16_t bt_get_be16(const void *ptr)
 	return bswap_16(bt_get_unaligned((const uint16_t *) ptr));
 }
 
+static inline void bt_put_be16(uint16_t val, void *dst)
+{
+	bt_put_unaligned(bswap_16(val), (uint16_t *) dst);
+}
+
 static inline void bt_put_be32(uint32_t val, void *dst)
 {
 	bt_put_unaligned(bswap_32(val), (uint32_t *) dst);
+}
+
+static inline void bt_put_be64(uint64_t val, void *ptr)
+{
+	bt_put_unaligned(bswap_64(val), (uint64_t *) ptr);
 }
 
 #elif __BYTE_ORDER == __BIG_ENDIAN
