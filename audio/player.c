@@ -734,34 +734,20 @@ static const GDBusSignalTable media_player_signals[] = {
 };
 
 static const GDBusPropertyTable media_player_properties[] = {
-	{ "Name", "s", get_name, NULL, name_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Type", "s", get_type, NULL, type_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Subtype", "s", get_subtype, NULL, subtype_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Position", "u", get_position, NULL, NULL,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Status", "s", get_status, NULL, status_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Equalizer", "s", get_setting, set_setting, setting_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Repeat", "s", get_setting, set_setting, setting_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Shuffle", "s", get_setting, set_setting, setting_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Scan", "s", get_setting, set_setting, setting_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Track", "a{sv}", get_track, NULL, track_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Device", "o", get_device, NULL, NULL,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Browsable", "b", get_browsable, NULL, browsable_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Searchable", "b", get_searchable, NULL, searchable_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
-	{ "Playlist", "o", get_playlist, NULL, playlist_exists,
-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
+	{ "Name", "s", get_name, NULL, name_exists },
+	{ "Type", "s", get_type, NULL, type_exists },
+	{ "Subtype", "s", get_subtype, NULL, subtype_exists },
+	{ "Position", "u", get_position, NULL, NULL },
+	{ "Status", "s", get_status, NULL, status_exists },
+	{ "Equalizer", "s", get_setting, set_setting, setting_exists },
+	{ "Repeat", "s", get_setting, set_setting, setting_exists },
+	{ "Shuffle", "s", get_setting, set_setting, setting_exists },
+	{ "Scan", "s", get_setting, set_setting, setting_exists },
+	{ "Track", "a{sv}", get_track, NULL, track_exists },
+	{ "Device", "o", get_device, NULL, NULL },
+	{ "Browsable", "b", get_browsable, NULL, browsable_exists },
+	{ "Searchable", "b", get_searchable, NULL, searchable_exists },
+	{ "Playlist", "o", get_playlist, NULL, playlist_exists },
 	{ }
 };
 
@@ -1300,7 +1286,7 @@ static gboolean process_metadata_changed(void *user_data)
 	const char *item;
 
 	mp->process_id = 0;
-
+	DBG("Meta data changed, %s", mp->path);
 	g_dbus_emit_property_changed(get_dbus_connection(),
 					mp->path, MEDIA_PLAYER_INTERFACE,
 					"Track");

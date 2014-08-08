@@ -1424,3 +1424,9 @@ const bdaddr_t * avctp_get_src(struct avctp *session)
 {
 	return &session->server->src;
 }
+
+
+guint avctp_get_browsing_id(struct avctp *session)
+{
+	return session->browsing_id;
+}

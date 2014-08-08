@@ -113,3 +113,4 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 
 const bdaddr_t * avctp_get_dest(struct avctp *session);
 const bdaddr_t * avctp_get_src(struct avctp *session);
+guint avctp_get_browsing_id(struct avctp *session);
