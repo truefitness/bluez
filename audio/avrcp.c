@@ -238,6 +238,8 @@ static void register_volume_notification(struct avrcp_player *player);
 static void avrcp_register_notification(struct control *con, uint8_t event);
 static void avrcp_get_element_attributes(struct avctp *session);
 static void avrcp_connect_browsing(struct avrcp_server *server);
+static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+								uint16_t id);
 
 static sdp_record_t *avrcp_ct_record(void)
 {
@@ -1294,6 +1296,10 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 	switch (new_state) {
 	case AVCTP_STATE_DISCONNECTED:
 	//media_player_destroy(server->ct_player->user_data);
+	
+	if(!server->ct_player)
+		return;
+	
 	server->ct_player->dev = dev;
 	while(server->ct_player)
 		avrcp_unregister_player(server->ct_player);
@@ -1355,6 +1361,15 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 				
 		data = sdp_data_get(rec, SDP_ATTR_SUPPORTED_FEATURES);
 		features = data->val.uint16;
+		
+		/* Only create player if category 1 is supported */
+		if (desc && (features & AVRCP_FEATURE_CATEGORY_1)){
+			player = create_ct_player(server, 0);
+			if (player == NULL){
+				sdp_list_free(list, free);
+				return;
+			}
+		}
 		
 		if(desc && (features & AVRCP_FEATURE_BROWSING)){
 			/* TODO call avrcp_connect_browser here */
