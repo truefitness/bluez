@@ -2828,11 +2828,13 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 	struct avrcp_player * player;
 	uint16_t count;
 	size_t i;
+	GSList *removed;
 	
 	if(pdu == NULL || pdu->params[0] != AVRCP_STATUS_SUCCESS || operand_count < 5) {
 		return FALSE;
 	}
 	
+	removed = g_slist_copy(server->players);
 	count = bt_get_be16(&operands[6]);
 	
 	for(i = 8; count && i < operand_count; count--) {
@@ -2856,10 +2858,8 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 		DBG("Perform parsing here!");
 		player = avrcp_parse_media_player_item(server, &operands[i], len);
 		
-		if(server->ct_player->browsable == true){
-			DBG("Set browsed player here");
-			avrcp_set_browsed_player(conn, server->ct_player);
-		}
+		if (player)
+			removed = g_slist_remove(removed, player);
 		
 		i+= len;
 		
