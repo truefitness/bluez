@@ -53,7 +53,7 @@
 #define VOL_DOWN_OP			0x42
 #define MUTE_OP				0x43
 #define PLAY_OP				0x44
-#define STAVC_OP_OP			0x45
+#define STOP_OP			0x45
 #define PAUSE_OP			0x46
 #define RECORD_OP			0x47
 #define REWIND_OP			0x48

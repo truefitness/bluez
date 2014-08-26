@@ -173,7 +173,7 @@ static struct {
 	uint16_t uinput;
 } key_map[] = {
 	{ "PLAY",		PLAY_OP,		KEY_PLAYCD },
-	{ "STOP",		STAVC_OP_OP,		KEY_STOPCD },
+	{ "STOP",		STOP_OP,		KEY_STOPCD },
 	{ "PAUSE",		PAUSE_OP,		KEY_PAUSECD },
 	{ "FORWARD",		FORWARD_OP,		KEY_NEXTSONG },
 	{ "BACKWARD",		BACKWARD_OP,		KEY_PREVIOUSSONG },

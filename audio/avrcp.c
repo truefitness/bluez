@@ -2333,6 +2333,57 @@ static void avrcp_set_browsed_player(struct avctp *session,
 				avrcp_set_browsed_player_rsp, player);
 }
 
+static int ct_press(struct avrcp_player *player, uint8_t op)
+{
+	int err;
+	struct avctp *session;
+
+	session = player->session;
+	if (session == NULL)
+		return -ENOTCONN;
+
+	err = avctp_send_passthrough(session, op);
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+
+static int ct_play(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, PLAY_OP);
+}
+
+static int ct_pause(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, PAUSE_OP);
+}
+
+static int ct_stop(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, STOP_OP);
+}
+
+static int ct_next(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, FORWARD_OP);
+}
+
+static int ct_previous(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, BACKWARD_OP);
+}
+
 static int ct_list_items(struct media_player *mp, const char *name,
 				uint32_t start, uint32_t end, void *user_data)
 {
@@ -2622,11 +2673,11 @@ static const struct media_player_callback ct_cbs = {
 	.play_item	= ct_play_item,
 	.add_to_nowplaying = ct_add_to_nowplaying,*/
 	.set_setting	= NULL,
-	.play		= NULL,
-	.pause		= NULL,
-	.stop		= NULL,
-	.next		= NULL,
-	.previous	= NULL,
+	.play		= ct_play,
+	.pause		= ct_pause,
+	.stop		= ct_stop,
+	.next		= ct_next,
+	.previous	= ct_previous,
 	.fast_forward	= NULL,
 	.rewind		= NULL,
 	.list_items	= ct_list_items,

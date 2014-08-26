@@ -199,7 +199,7 @@ static DBusMessage *control_pause(DBusConnection *conn, DBusMessage *msg,
 static DBusMessage *control_stop(DBusConnection *conn, DBusMessage *msg,
 								void *data)
 {
-	return internal_send_passthrough(conn, msg, data, STAVC_OP_OP);
+	return internal_send_passthrough(conn, msg, data, STOP_OP);
 }
 
 static DBusMessage *control_forward(DBusConnection *conn, DBusMessage *msg,
