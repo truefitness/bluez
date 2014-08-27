@@ -90,7 +90,6 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		break;
 	case AVCTP_STATE_CONNECTED:
 		DBG("Control connected");
-		avrcp_get_capabilities(control);
 		value = TRUE;
 		g_dbus_emit_signal(dev->conn, dev->path,
 				AUDIO_CONTROL_INTERFACE, "Connected",

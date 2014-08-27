@@ -87,6 +87,10 @@ typedef gboolean (*avctp_rsp_cb) (struct avctp *session, uint8_t code,
 typedef gboolean (*avctp_browsing_rsp_cb) (struct avctp *session,
 					uint8_t *operands, size_t operand_count,
 					void *user_data);
+typedef size_t (*avctp_browsing_pdu_cb) (struct avctp *session,
+					uint8_t transaction,
+					uint8_t *operands, size_t operand_count,
+					void *user_data);
 
 unsigned int avctp_add_state_cb(avctp_state_cb cb, void *user_data);
 gboolean avctp_remove_state_cb(unsigned int id);
@@ -114,3 +118,5 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
 const bdaddr_t * avctp_get_dest(struct avctp *session);
 const bdaddr_t * avctp_get_src(struct avctp *session);
 guint avctp_get_browsing_id(struct avctp *session);
+struct audio_device * avctp_get_dev(struct avctp * session);
+void avctp_set_dev(struct avctp *session, struct audio_device *dev);

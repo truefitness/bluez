@@ -235,12 +235,13 @@ static uint32_t company_ids[] = {
 };
 
 static void register_volume_notification(struct avrcp_player *player);
-static void avrcp_register_notification(struct control *con, uint8_t event);
+static void avrcp_register_notification(struct avctp *session, uint8_t event);
 static void avrcp_get_element_attributes(struct avctp *session);
 static void avrcp_connect_browsing(struct avrcp_server *server);
 static struct avrcp_player *create_ct_player(struct avrcp_server *server,
 								uint16_t id);
 static void avrcp_get_media_player_list(struct avrcp_server *server);
+static void avrcp_get_capabilities(struct avctp *session);
 
 static sdp_record_t *avrcp_ct_record(void)
 {
@@ -1318,6 +1319,12 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		break;
 	case AVCTP_STATE_CONNECTING:
 		DBG("AVRCP Connecting");
+		/*if(!server->session)
+			session = avctp_connect(&dev->src, &dev->dst);			
+		if(session) {
+			server->session = session;
+		}*/
+		
 		//avrcp_get_capabilities(dev);
 /*
 		player->session = avctp_connect(&dev->src, &dev->dst);
@@ -1332,19 +1339,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		break;
 	case AVCTP_STATE_CONNECTED:
 		DBG("AVRCP Connected");
-			
-		/* 
-		 * This callback gets called when the avctp layer gets 
-		 * connected regardless if the host or device initiated the 
-		 * connection. This check is to make sure the avrcp server 
-		 * object's session member is initialized 
-		 */	
-		if(!server->session){
-			session = avctp_connect(&dev->src, &dev->dst);			
-			if(session) {
-				server->session = session;
-			}	
-		}
+		
 		
 		rec = btd_device_get_record(dev->btd_dev, AVRCP_TARGET_UUID);
 		if (rec == NULL)
@@ -1354,37 +1349,40 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 			return;
 
 		desc = list->data;
-
-		if (desc && desc->version >= 0x0104){
-			;
-			//register_volume_notification(player);
-		}
 				
 		data = sdp_data_get(rec, SDP_ATTR_SUPPORTED_FEATURES);
 		features = data->val.uint16;
 		
 		/* Only create player if category 1 is supported */
-		if (desc && (features & AVRCP_FEATURE_CATEGORY_1)){
-			player = create_ct_player(server, 0);
-			if (player == NULL){
-				sdp_list_free(list, free);
-				return;
-			}
-		}
+		if (!desc || !(features & AVRCP_FEATURE_CATEGORY_1))
+			return;
+		DBG("Category 1 supported");
+		player = create_ct_player(server, 0);
+		if (player == NULL)
+			return;
+		DBG("Player created");
+		if (!desc || desc->version < 0x0103)
+			return;
+		DBG("AVRCP at least 1.3");
+		DBG("Calling get capability");
+		avrcp_get_capabilities(server->session);
+
+		if (!desc || desc->version < 0x0104)
+			return;
+		DBG("AVRCP at least 1.4");
+		if(!desc || !(features & AVRCP_FEATURE_BROWSING))
+			return;
+		DBG("Browsing supported");
+		avrcp_connect_browsing(server);
 		
-		if(desc && (features & AVRCP_FEATURE_BROWSING)){
-			/* TODO call avrcp_connect_browser here */
-			/* this expects avrcp struct as parameter */
-			avrcp_connect_browsing(server);
-		}
 		sdp_list_free(list, free);
+		
 		return;
 		
 	case AVCTP_STATE_BROWSING_CONNECTED:
 		if (server->browsing_timer > 0) {
 			g_source_remove(server->browsing_timer);
 			server->browsing_timer = 0;			
-			//avctp_connect_browsing(session->conn);
 		}
 		DBG("AVCTP_STATE_BROWSING_CONNECTED");
 		return;
@@ -1410,7 +1408,9 @@ gboolean avrcp_connect(struct audio_device *dev)
 		DBG("Connecting to avrcp failed");
 		return FALSE;
 	}
-	
+	DBG("Setting dev: %p", dev);
+	avctp_set_dev(session, dev);
+	server->session = session;
 	return TRUE;
 }
 
@@ -1686,6 +1686,10 @@ static gboolean avrcp_get_play_status_rsp(struct avctp *conn,
 	
 	server = find_server(servers, avctp_get_src(session));
 	player = server->ct_player;
+	
+	if(!player)
+		return FALSE;
+		
 	mp = player->user_data;
 
 	if (pdu == NULL || code == AVC_CTYPE_REJECTED ||
@@ -1723,19 +1727,27 @@ static void avrcp_get_play_status(struct avctp *session)
 					session);
 }
 
-static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
+static gboolean avrcp_get_capabilities_resp(struct avctp *session,
 					uint8_t code, uint8_t subunit,
 					uint8_t *operands, size_t operand_count,
 					void *user_data)
 {
-	struct control *control_ptr = user_data;
 	struct avrcp_header *pdu = (void *) operands;
+	struct avrcp_server *server;
 	uint16_t events = 0;
 	uint8_t count;
 
 	if (pdu == NULL || pdu->params[0] != CAP_EVENTS_SUPPORTED)
 		return FALSE;
 	DBG("get capabilities response");
+	
+	/* Connect browsing if pending */
+	server = find_server(servers, avctp_get_src(session));
+	if (server->browsing_timer > 0) {
+		g_source_remove(server->browsing_timer);
+		server->browsing_timer = 0;
+		avctp_connect_browsing(session);
+	}
 
 	count = pdu->params[1];
 
@@ -1753,7 +1765,7 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
 		case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
 		//case AVRCP_EVENT_VOLUME_CHANGED:
 			DBG("Event Supported: %d", event);
-			avrcp_register_notification(control_ptr, event);
+			avrcp_register_notification(session, event);
 			break;
 		}
 	}
@@ -1762,22 +1774,22 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
 	//	avrcp_list_player_attributes(conn);
 
 	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
-		avrcp_get_play_status(conn);
+		avrcp_get_play_status(session);
     
 	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
-		avrcp_get_element_attributes(conn);
+		avrcp_get_element_attributes(session);
 
-	return TRUE;
+	return FALSE;
 }
  
-void avrcp_get_capabilities(struct control *con)
+void avrcp_get_capabilities(struct avctp *session)
 {
 	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_GET_CAPABILITIES_PARAM_LENGTH];
 	struct avrcp_header *pdu = (void *) buf;
 	uint8_t length;
 	
 
-	if (con->session == NULL)
+	if (session == NULL)
 		return;
 
 	memset(buf, 0, sizeof(buf));
@@ -1789,11 +1801,11 @@ void avrcp_get_capabilities(struct control *con)
 	pdu->params_len = htons(AVRCP_GET_CAPABILITIES_PARAM_LENGTH);
 
 	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
-	DBG("Getting caps for session: %p", con->session);
-	avctp_send_vendordep_req(con->session, AVC_CTYPE_STATUS,
+	DBG("Getting caps for session: %p", session);
+	avctp_send_vendordep_req(session, AVC_CTYPE_STATUS,
 					AVC_SUBUNIT_PANEL, buf, length,
 					avrcp_get_capabilities_resp,
-					con);
+					session);
 }
 
 static gboolean connect_browsing(gpointer user_data)
@@ -1818,8 +1830,6 @@ static void avrcp_connect_browsing(struct avrcp_server *server)
 		return;
 	}
 
-	/* this gets done when this is not the initiator */
-	/* comment out for now */
 	if (server->browsing_timer > 0)
 		return;
 
@@ -1922,6 +1932,9 @@ static gboolean avrcp_get_element_attributes_rsp(struct avctp *session,
 	
 	server = find_server(servers, avctp_get_src(session));
 	player = server->ct_player;
+	
+	if(!player)
+	 return FALSE;
 
 	if (code == AVC_CTYPE_REJECTED)
 		return FALSE;
@@ -2687,6 +2700,7 @@ static const struct media_player_callback ct_cbs = {
 	.add_to_nowplaying = ct_add_to_nowplaying,
 };
 
+
 static struct avrcp_player *create_ct_player(struct avrcp_server *server,
 								uint16_t id)
 {
@@ -2698,10 +2712,10 @@ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
 	player = g_new0(struct avrcp_player, 1);
 	player->session = server->session;
 	player->server = server;
-
-	dev = manager_get_device(&server->src, avctp_get_dest(server->session), FALSE);
+	
+	dev = avctp_get_dev(server->session);
 	player->dev = dev;
-
+	
 	path = dev->path;
 	
 	DBG("path: %s", path);
@@ -2916,7 +2930,12 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
 		
 	}
 	
-	return TRUE;
+	if (g_slist_find(removed, server->ct_player))
+		server->ct_player = NULL;
+
+	g_slist_free(removed);
+	
+	return FALSE;
 }
 
 static void avrcp_get_media_player_list(struct avrcp_server *server)
@@ -3033,7 +3052,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 					uint8_t *operands, size_t operand_count,
 					void *user_data)
 {
-	struct control *session = user_data;
+	struct avctp *session = user_data;
 	struct avrcp_header *pdu = (void *) operands;
 	const char *curval, *strval;
 	uint8_t event;
@@ -3066,19 +3085,19 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 		//avrcp_volume_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_STATUS_CHANGED:
-		avrcp_status_changed(conn, pdu);
+		avrcp_status_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_TRACK_CHANGED:
-		avrcp_track_changed(conn, pdu);
+		avrcp_track_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_SETTINGS_CHANGED:
 		//avrcp_setting_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
-		avrcp_available_players_changed(conn, pdu);
+		avrcp_available_players_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
-		avrcp_addressed_player_changed(conn, pdu);
+		avrcp_addressed_player_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_UIDS_CHANGED:
 		//avrcp_uids_changed(session, pdu);
@@ -3090,7 +3109,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 	return TRUE;
 }
 
-static void avrcp_register_notification(struct control *con, uint8_t event)
+static void avrcp_register_notification(struct avctp *session, uint8_t event)
 {
 	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_REGISTER_NOTIFICATION_PARAM_LENGTH];
 	struct avrcp_header *pdu = (void *) buf;
@@ -3106,9 +3125,9 @@ static void avrcp_register_notification(struct control *con, uint8_t event)
 
 	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
 
-	avctp_send_vendordep_req(con->session, AVC_CTYPE_NOTIFY,
+	avctp_send_vendordep_req(session, AVC_CTYPE_NOTIFY,
 					AVC_SUBUNIT_PANEL, buf, length,
-					avrcp_handle_event, con);
+					avrcp_handle_event, session);
 }
 
 unsigned int avrcp_add_state_cb(avrcp_state_cb cb, void *user_data)
