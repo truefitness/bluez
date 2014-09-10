@@ -99,7 +99,7 @@ struct media_player {
 	guint			watch;
 	guint			property_watch;
 	guint			track_watch;
-	char			*status;
+	uint8_t			status;
 	uint32_t		position;
 	uint8_t			volume;
 	GTimer			*timer;
@@ -1320,7 +1320,7 @@ static void *get_metadata(uint32_t id, void *user_data)
 	return NULL;
 }
 
-static const char *get_status(void *user_data)
+static uint8_t get_status(void *user_data)
 {
 	struct media_player *mp = user_data;
 
@@ -1333,7 +1333,7 @@ static uint32_t get_position(void *user_data)
 	double timedelta;
 	uint32_t sec, msec;
 
-	if (mp->status == NULL || strcasecmp(mp->status, "playing") != 0)
+	if (mp->status != AVRCP_PLAY_STATUS_PLAYING)
 		return mp->position;
 
 	timedelta = g_timer_elapsed(mp->timer, NULL);
@@ -1392,6 +1392,7 @@ static void media_player_exit(DBusConnection *connection, void *user_data)
 static gboolean set_status(struct media_player *mp, DBusMessageIter *iter)
 {
 	const char *value;
+	int val;
 
 	if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_STRING)
 		return FALSE;
@@ -1399,16 +1400,21 @@ static gboolean set_status(struct media_player *mp, DBusMessageIter *iter)
 	dbus_message_iter_get_basic(iter, &value);
 	DBG("Status=%s", value);
 
-	if (g_strcmp0(mp->status, value) == 0)
+	val = play_status_to_val(value);
+	if (val < 0) {
+		error("Invalid status");
+		return FALSE;
+	}
+
+	if (mp->status == val)
 		return TRUE;
 
 	mp->position = get_position(mp);
 	g_timer_start(mp->timer);
 
-	g_free(mp->status);
-	mp->status = g_strdup(value);
+	mp->status = val;
 
-	avrcp_player_event(mp->player, AVRCP_EVENT_STATUS_CHANGED, mp->status);
+	avrcp_player_event(mp->player, AVRCP_EVENT_STATUS_CHANGED, &val);
 
 	return TRUE;
 }
@@ -1416,7 +1422,6 @@ static gboolean set_status(struct media_player *mp, DBusMessageIter *iter)
 static gboolean set_position(struct media_player *mp, DBusMessageIter *iter)
 {
 	uint32_t value;
-	const char *status;
 	struct metadata_value *duration;
 
 	if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_UINT32)
@@ -1424,11 +1429,6 @@ static gboolean set_position(struct media_player *mp, DBusMessageIter *iter)
 
 	dbus_message_iter_get_basic(iter, &value);
 	DBG("Position=%u", value);
-	
-	if (value > get_position(mp))
-		status = "forward-seek";
-	else
-		status = "reverse-seek";
 
 	mp->position = value;
 	g_timer_start(mp->timer);
@@ -1447,17 +1447,11 @@ static gboolean set_position(struct media_player *mp, DBusMessageIter *iter)
 	 * duration, we send a track-reached-end event.
 	 */
 	if (mp->position == UINT32_MAX ||
-			(duration && mp->position >= duration->value.num)) {
+			(duration && mp->position >= duration->value.num))
 		avrcp_player_event(mp->player, AVRCP_EVENT_TRACK_REACHED_END,
 									NULL);
 
-		return TRUE;
-	}
-	
-	/* Send a status change to force resync the position */
-	avrcp_player_event(mp->player, AVRCP_EVENT_STATUS_CHANGED, status);
-
-	return TRUE; 
+	return TRUE;
 }
 
 static gboolean set_property(struct media_player *mp, const char *key,

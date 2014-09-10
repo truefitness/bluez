@@ -86,7 +86,7 @@ struct avrcp_player_cb {
 	uint64_t (*get_uid) (void *user_data);
 	void *(*get_metadata) (uint32_t id, void *user_data);
 	GList *(*list_metadata) (void *user_data);
-	uint8_t (*get_status) (void *user_data);
+	const char *(*get_status) (void *user_data);
 	uint32_t (*get_position) (void *user_data);
 	void (*set_volume) (uint8_t volume, struct audio_device *dev,
 							void *user_data);

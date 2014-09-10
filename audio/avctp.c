@@ -174,6 +174,9 @@ struct avctp_channel {
 struct avctp {
 	struct avctp_server *server;
 	struct audio_device *dev;
+	
+	uint16_t registered_events;
+	
 	bdaddr_t dst;
 
 	avctp_state_t state;
@@ -1713,4 +1716,18 @@ void avctp_set_dev(struct avctp *session, struct audio_device *dev)
 		return;
 		
 	session->dev = dev;
+}
+
+uint16_t avctp_get_registered_events(struct avctp *session)
+{
+	if(!session)
+		return 0;
+	return session->registered_events;
+}
+	
+void avctp_set_registered_events(struct avctp *session, uint16_t event)
+{
+	if(!session)
+		return;
+	session->registered_events = event;
 }

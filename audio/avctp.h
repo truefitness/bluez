@@ -120,3 +120,6 @@ const bdaddr_t * avctp_get_src(struct avctp *session);
 guint avctp_get_browsing_id(struct avctp *session);
 struct audio_device * avctp_get_dev(struct avctp * session);
 void avctp_set_dev(struct avctp *session, struct audio_device *dev);
+uint16_t avctp_get_registered_events(struct avctp *session);
+void avctp_set_registered_events(struct avctp *session, uint16_t event);
+

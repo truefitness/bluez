@@ -2570,8 +2570,8 @@ void device_bonding_complete(struct btd_device *device, uint8_t status)
 
 	DBG("bonding %p status 0x%02x", bonding, status);
 
-	if (auth && (auth->type == AUTH_TYPE_NOTIFY_PASSKEY
-		     || auth->type == AUTH_TYPE_NOTIFY_PINCODE) && auth->agent)
+//see commit 3bcea1a1..
+	if (auth && auth->agent)
 		agent_cancel(auth->agent);
 
 	if (status) {

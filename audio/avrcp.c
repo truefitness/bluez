@@ -211,7 +211,6 @@ struct avrcp_player {
 	uint64_t uid;
 	uint16_t uid_counter;
 	bool browsed;
-	bool browsable;
 	uint8_t *features;
 	char *path;
 	uint8_t scope;
@@ -954,6 +953,20 @@ err:
 	return AVC_CTYPE_REJECTED;
 }
 
+static uint8_t player_get_status(struct avrcp_player *player)
+{
+	const char *value;
+
+	if (player == NULL)
+		return AVRCP_PLAY_STATUS_STOPPED;
+
+	value = player->cb->get_status(player->user_data);
+	if (value == NULL)
+		return AVRCP_PLAY_STATUS_STOPPED;
+
+	return play_status_to_val(value);
+}
+
 static uint8_t avrcp_handle_get_play_status(struct avrcp_player *player,
 						struct avrcp_header *pdu,
 						uint8_t transaction)
@@ -981,7 +994,7 @@ static uint8_t avrcp_handle_get_play_status(struct avrcp_player *player,
 
 	memcpy(&pdu->params[0], &duration, 4);
 	memcpy(&pdu->params[4], &position, 4);
-	pdu->params[8] = player->cb->get_status(player->user_data);;
+	pdu->params[8] = player_get_status(player);
 
 	pdu->params_len = htons(9);
 
@@ -1006,7 +1019,7 @@ static uint8_t avrcp_handle_register_notification(struct avrcp_player *player,
 	switch (pdu->params[0]) {
 	case AVRCP_EVENT_STATUS_CHANGED:
 		len = 2;
-		pdu->params[1] = player->cb->get_status(player->user_data);
+		pdu->params[1] = player_get_status(player);
 
 		break;
 	case AVRCP_EVENT_TRACK_CHANGED:
@@ -1767,6 +1780,10 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *session,
 			DBG("Event Supported: %d", event);
 			avrcp_register_notification(session, event);
 			break;
+		default:
+			DBG("Unhandled event: %d", event);
+			break;
+			
 		}
 	}
 	
@@ -2036,7 +2053,6 @@ static void avrcp_player_parse_features(struct avrcp_player *player, uint8_t * f
 		media_player_set_browsable(mp, true);
 		media_player_create_folder(mp, "/Filesystem",
 						PLAYER_FOLDER_TYPE_MIXED, 0);
-		player->browsable = true;
 	}
 
 	if (features[7] & 0x10) {
@@ -2397,6 +2413,20 @@ static int ct_previous(struct media_player *mp, void *user_data)
 	return ct_press(player, BACKWARD_OP);
 }
 
+static int ct_fast_forward(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, FAST_FORWARD_OP);
+}
+
+static int ct_rewind(struct media_player *mp, void *user_data)
+{
+	struct avrcp_player *player = user_data;
+
+	return ct_press(player, REWIND_OP);
+}
+
 static int ct_list_items(struct media_player *mp, const char *name,
 				uint32_t start, uint32_t end, void *user_data)
 {
@@ -2691,8 +2721,8 @@ static const struct media_player_callback ct_cbs = {
 	.stop		= ct_stop,
 	.next		= ct_next,
 	.previous	= ct_previous,
-	.fast_forward	= NULL,
-	.rewind		= NULL,
+	.fast_forward	= ct_fast_forward,
+	.rewind		= ct_rewind,
 	.list_items	= ct_list_items,
 	.change_folder	= ct_change_folder,
 	.search		= NULL,
@@ -2847,8 +2877,6 @@ static struct avrcp_player * avrcp_parse_media_player_item(struct avrcp_server *
 			return NULL;
 	} else if (player->features != NULL)
 		return player;
-		
-	player->id = id;
 	
 	mp = player->user_data;
 
@@ -3000,6 +3028,103 @@ static void avrcp_track_changed(struct avctp *session,
 		avrcp_get_element_attributes(session);
 }
 
+static const char *attr_to_str(uint8_t attr)
+{
+	switch (attr) {
+	case AVRCP_ATTRIBUTE_EQUALIZER:
+		return "Equalizer";
+	case AVRCP_ATTRIBUTE_REPEAT_MODE:
+		return "Repeat";
+	case AVRCP_ATTRIBUTE_SHUFFLE:
+		return "Shuffle";
+	case AVRCP_ATTRIBUTE_SCAN:
+		return "Scan";
+	}
+
+	return NULL;
+}
+
+static const char *attrval_to_str(uint8_t attr, uint8_t value)
+{
+	switch (attr) {
+	case AVRCP_ATTRIBUTE_EQUALIZER:
+		switch (value) {
+		case AVRCP_EQUALIZER_ON:
+			return "on";
+		case AVRCP_EQUALIZER_OFF:
+			return "off";
+		}
+
+		break;
+	case AVRCP_ATTRIBUTE_REPEAT_MODE:
+		switch (value) {
+		case AVRCP_REPEAT_MODE_OFF:
+			return "off";
+		case AVRCP_REPEAT_MODE_SINGLE:
+			return "singletrack";
+		case AVRCP_REPEAT_MODE_ALL:
+			return "alltracks";
+		case AVRCP_REPEAT_MODE_GROUP:
+			return "group";
+		}
+
+		break;
+	/* Shuffle and scan have the same values */
+	case AVRCP_ATTRIBUTE_SHUFFLE:
+	case AVRCP_ATTRIBUTE_SCAN:
+		switch (value) {
+		case AVRCP_SCAN_OFF:
+			return "off";
+		case AVRCP_SCAN_ALL:
+			return "alltracks";
+		case AVRCP_SCAN_GROUP:
+			return "group";
+		}
+
+		break;
+	}
+
+	return NULL;
+}
+
+static void avrcp_setting_changed(struct avctp *session,
+						struct avrcp_header *pdu)
+{
+	
+	struct avrcp_server *server;
+	
+	struct avrcp_player *player;
+	struct media_player *mp;
+	uint8_t count = pdu->params[1];
+	int i;
+	
+	server = find_server(servers, avctp_get_src(session));
+	
+	if(!server)
+		return;
+		
+	player = server->ct_player;
+	if(!player)
+		return;
+	
+	mp = player->user_data;
+
+	for (i = 2; count > 0; count--, i += 2) {
+		const char *key;
+		const char *value;
+
+		key = attr_to_str(pdu->params[i]);
+		if (key == NULL)
+			continue;
+
+		value = attrval_to_str(pdu->params[i], pdu->params[i + 1]);
+		if (value == NULL)
+			continue;
+
+		media_player_set_setting(mp, key, value);
+	}
+}
+
 static void avrcp_available_players_changed(struct avctp *session,
 						struct avrcp_header *pdu)
 {
@@ -3017,13 +3142,9 @@ static void avrcp_addressed_player_changed(struct avctp *session,
 	struct avrcp_player *player;
 	uint16_t id = bt_get_be16(&pdu->params[1]);
 	
-	server = find_server(servers, avctp_get_src(session));
-	
+	server = find_server(servers, avctp_get_src(session));	
 	if(!server)
 		return;
-		
-	
-	
 	player = server->ct_player;
 
 	if (player != NULL && player->id == id)
@@ -3056,6 +3177,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 	struct avrcp_header *pdu = (void *) operands;
 	const char *curval, *strval;
 	uint8_t event;
+	uint16_t tmp;
 
 	if ((code != AVC_CTYPE_INTERIM && code != AVC_CTYPE_CHANGED) ||
 								pdu == NULL)
@@ -3064,18 +3186,11 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 	event = pdu->params[0];
 
 	if (code == AVC_CTYPE_CHANGED) {
-		switch (event){
-			case AVRCP_EVENT_TRACK_CHANGED:
-			case AVRCP_EVENT_STATUS_CHANGED:
-			case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
-			case AVRCP_EVENT_SETTINGS_CHANGED:
-			case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
-			case AVRCP_EVENT_UIDS_CHANGED:
-				avrcp_register_notification(session, event);
-				break;
-		}
+		tmp = avctp_get_registered_events(session);
+		tmp ^= (1 << event);
+		avctp_set_registered_events(session,tmp);
 		//session->registered_events ^= (1 << event);
-		//avrcp_register_notification(session, event);
+		avrcp_register_notification(session, event);
 		return FALSE;
 	}
 
@@ -3091,7 +3206,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 		avrcp_track_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_SETTINGS_CHANGED:
-		//avrcp_setting_changed(session, pdu);
+		avrcp_setting_changed(session, pdu);
 		break;
 	case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
 		avrcp_available_players_changed(session, pdu);
@@ -3103,7 +3218,10 @@ static gboolean avrcp_handle_event(struct avctp *conn,
 		//avrcp_uids_changed(session, pdu);
 		break;
 	}
-
+	
+	tmp = avctp_get_registered_events(session);
+		tmp |= (1 << event);
+	avctp_set_registered_events(session,tmp); 
 	//session->registered_events |= (1 << event);
 
 	return TRUE;
