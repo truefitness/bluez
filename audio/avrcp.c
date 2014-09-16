@@ -1332,11 +1332,11 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
 		break;
 	case AVCTP_STATE_CONNECTING:
 		DBG("AVRCP Connecting");
-		/*if(!server->session)
+		if(!server->session)
 			session = avctp_connect(&dev->src, &dev->dst);			
 		if(session) {
 			server->session = session;
-		}*/
+		}
 		
 		//avrcp_get_capabilities(dev);
 /*

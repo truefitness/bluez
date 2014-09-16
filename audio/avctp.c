@@ -1220,7 +1220,7 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
 	}
 
 	avctp_set_state(session, AVCTP_STATE_CONNECTING);
-	session->control->io = g_io_channel_ref(chan);
+	session->control = avctp_channel_create(session, chan, NULL);
 
 	if (audio_device_request_authorization(dev, AVRCP_TARGET_UUID,
 						auth_cb, session) < 0)
