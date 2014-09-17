@@ -1,0 +1,130 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Tue, 26 Aug 2014 13:42:09 -0500
+Subject: implemented player controls for the dbus interface
+
+---
+ audio/avctp.c   |    2 +-
+ audio/avctp.h   |    2 +-
+ audio/avrcp.c   |   61 ++++++++++++++++++++++++++++++++++++++++++++++++++-----
+ audio/control.c |    2 +-
+ 4 files changed, 59 insertions(+), 8 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index b417fee..5ab53d8 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -173,7 +173,7 @@ static struct {
+ 	uint16_t uinput;
+ } key_map[] = {
+ 	{ "PLAY",		PLAY_OP,		KEY_PLAYCD },
+-	{ "STOP",		STAVC_OP_OP,		KEY_STOPCD },
++	{ "STOP",		STOP_OP,		KEY_STOPCD },
+ 	{ "PAUSE",		PAUSE_OP,		KEY_PAUSECD },
+ 	{ "FORWARD",		FORWARD_OP,		KEY_NEXTSONG },
+ 	{ "BACKWARD",		BACKWARD_OP,		KEY_PREVIOUSSONG },
+diff --git a/audio/avctp.h b/audio/avctp.h
+index 755235f..2f3150f 100644
+--- a/audio/avctp.h
++++ b/audio/avctp.h
+@@ -53,7 +53,7 @@
+ #define VOL_DOWN_OP			0x42
+ #define MUTE_OP				0x43
+ #define PLAY_OP				0x44
+-#define STAVC_OP_OP			0x45
++#define STOP_OP			0x45
+ #define PAUSE_OP			0x46
+ #define RECORD_OP			0x47
+ #define REWIND_OP			0x48
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 05f83bf..2fbf26c 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -2333,6 +2333,57 @@ static void avrcp_set_browsed_player(struct avctp *session,
+ 				avrcp_set_browsed_player_rsp, player);
+ }
+ 
++static int ct_press(struct avrcp_player *player, uint8_t op)
++{
++	int err;
++	struct avctp *session;
++
++	session = player->session;
++	if (session == NULL)
++		return -ENOTCONN;
++
++	err = avctp_send_passthrough(session, op);
++	if (err < 0)
++		return err;
++
++	return 0;
++}
++
++static int ct_play(struct media_player *mp, void *user_data)
++{
++	struct avrcp_player *player = user_data;
++
++	return ct_press(player, PLAY_OP);
++}
++
++static int ct_pause(struct media_player *mp, void *user_data)
++{
++	struct avrcp_player *player = user_data;
++
++	return ct_press(player, PAUSE_OP);
++}
++
++static int ct_stop(struct media_player *mp, void *user_data)
++{
++	struct avrcp_player *player = user_data;
++
++	return ct_press(player, STOP_OP);
++}
++
++static int ct_next(struct media_player *mp, void *user_data)
++{
++	struct avrcp_player *player = user_data;
++
++	return ct_press(player, FORWARD_OP);
++}
++
++static int ct_previous(struct media_player *mp, void *user_data)
++{
++	struct avrcp_player *player = user_data;
++
++	return ct_press(player, BACKWARD_OP);
++}
++
+ static int ct_list_items(struct media_player *mp, const char *name,
+ 				uint32_t start, uint32_t end, void *user_data)
+ {
+@@ -2622,11 +2673,11 @@ static const struct media_player_callback ct_cbs = {
+ 	.play_item	= ct_play_item,
+ 	.add_to_nowplaying = ct_add_to_nowplaying,*/
+ 	.set_setting	= NULL,
+-	.play		= NULL,
+-	.pause		= NULL,
+-	.stop		= NULL,
+-	.next		= NULL,
+-	.previous	= NULL,
++	.play		= ct_play,
++	.pause		= ct_pause,
++	.stop		= ct_stop,
++	.next		= ct_next,
++	.previous	= ct_previous,
+ 	.fast_forward	= NULL,
+ 	.rewind		= NULL,
+ 	.list_items	= ct_list_items,
+diff --git a/audio/control.c b/audio/control.c
+index 6ac6d52..1484227 100644
+--- a/audio/control.c
++++ b/audio/control.c
+@@ -199,7 +199,7 @@ static DBusMessage *control_pause(DBusConnection *conn, DBusMessage *msg,
+ static DBusMessage *control_stop(DBusConnection *conn, DBusMessage *msg,
+ 								void *data)
+ {
+-	return internal_send_passthrough(conn, msg, data, STAVC_OP_OP);
++	return internal_send_passthrough(conn, msg, data, STOP_OP);
+ }
+ 
+ static DBusMessage *control_forward(DBusConnection *conn, DBusMessage *msg,
+-- 

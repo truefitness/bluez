@@ -1,0 +1,26 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Thu, 21 Aug 2014 16:30:35 -0500
+Subject: removed experimental flags from media folder properties
+
+---
+ audio/player.c |    6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/audio/player.c b/audio/player.c
+index 721ba43..3fd6bc6 100644
+--- a/audio/player.c
++++ b/audio/player.c
+@@ -1083,10 +1083,8 @@ static const GDBusMethodTable media_folder_methods[] = {
+ };
+ 
+ static const GDBusPropertyTable media_folder_properties[] = {
+-	{ "Name", "s", get_folder_name, NULL, folder_name_exists,
+-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
+-	{ "NumberOfItems", "u", get_items, NULL, items_exists,
+-					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
++	{ "Name", "s", get_folder_name, NULL, folder_name_exists },
++	{ "NumberOfItems", "u", get_items, NULL, items_exists },
+ 	{ }
+ };
+ 
+-- 

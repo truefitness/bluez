@@ -1,0 +1,41 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Tue, 16 Sep 2014 14:08:37 -0500
+Subject: Fix crash when initiating connection from TG
+
+---
+ audio/avctp.c |    2 +-
+ audio/avrcp.c |    4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index bbf9e42..c394e13 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -1220,7 +1220,7 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
+ 	}
+ 
+ 	avctp_set_state(session, AVCTP_STATE_CONNECTING);
+-	session->control->io = g_io_channel_ref(chan);
++	session->control = avctp_channel_create(session, chan, NULL);
+ 
+ 	if (audio_device_request_authorization(dev, AVRCP_TARGET_UUID,
+ 						auth_cb, session) < 0)
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index c1e8e49..5ffbe40 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -1332,11 +1332,11 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		break;
+ 	case AVCTP_STATE_CONNECTING:
+ 		DBG("AVRCP Connecting");
+-		/*if(!server->session)
++		if(!server->session)
+ 			session = avctp_connect(&dev->src, &dev->dst);			
+ 		if(session) {
+ 			server->session = session;
+-		}*/
++		}
+ 		
+ 		//avrcp_get_capabilities(dev);
+ /*
+-- 
