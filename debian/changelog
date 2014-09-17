@@ -1,12 +1,19 @@
-bluez (4.101-0ubuntu8b1true8) precise; urgency=low
+bluez (4.101-0ubuntu8b1true8~1.gbpdaa870) precise; urgency=low
+
+  ** SNAPSHOT build @daa870f0e63f6f7d7aee969fa322dc63439547f9 **
 
   [ Robert Hedges ]
   * Initial check-in of git-buildpackage related helper files.
   * clever
   * Added first draft of packaging instructions.
   * Reformatted patches to be gpb-pq compatible.
+  * Added an git-buildpackage configuration file to simplify build command.
+  * Removed draft build instructions and pointed to wiki
 
- -- Robert <rhedges@truefitness.com>  Thu, 29 May 2014 17:01:02 -0500
+  [ Nathaniel Abalos ]
+  * Added bluetooth playlist patch
+
+ -- Nathaniel Abalos <ncabalos@truefitness.com>  Wed, 17 Sep 2014 15:49:19 -0500
 
 bluez (4.101-0ubuntu8b1true1ubuntu7) precise; urgency=low
 
