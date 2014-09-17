@@ -1,6 +1,6 @@
-bluez (4.101-0ubuntu8b1true8~1.gbpdaa870) precise; urgency=low
+bluez (4.101-0ubuntu8b1true8~2.gbpff2cb6) precise; urgency=low
 
-  ** SNAPSHOT build @daa870f0e63f6f7d7aee969fa322dc63439547f9 **
+  ** SNAPSHOT build @ff2cb69c629a36c14a5e1760dd57cc61094783f2 **
 
   [ Robert Hedges ]
   * Initial check-in of git-buildpackage related helper files.
@@ -12,8 +12,10 @@ bluez (4.101-0ubuntu8b1true8~1.gbpdaa870) precise; urgency=low
 
   [ Nathaniel Abalos ]
   * Added bluetooth playlist patch
+  * Build 4.101-0ubuntu8b1true8~1.gbpdaa870
+  * Remove build dep. on libnl-3-dev
 
- -- Nathaniel Abalos <ncabalos@truefitness.com>  Wed, 17 Sep 2014 15:49:19 -0500
+ -- Nathaniel Abalos <ncabalos@truefitness.com>  Wed, 17 Sep 2014 16:32:43 -0500
 
 bluez (4.101-0ubuntu8b1true1ubuntu7) precise; urgency=low
 
