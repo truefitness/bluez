@@ -1,0 +1,80 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Tue, 26 Aug 2014 13:10:19 -0500
+Subject: implemented handlers for missing events
+
+---
+ audio/avrcp.c |   30 ++++++++++++++++++++----------
+ 1 file changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 13b05bc..1988bf3 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -240,6 +240,7 @@ static void avrcp_get_element_attributes(struct avctp *session);
+ static void avrcp_connect_browsing(struct avrcp_server *server);
+ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+ 								uint16_t id);
++static void avrcp_get_media_player_list(struct avrcp_server *server);
+ 
+ static sdp_record_t *avrcp_ct_record(void)
+ {
+@@ -1746,10 +1747,10 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
+ 		switch (event) {
+ 		case AVRCP_EVENT_STATUS_CHANGED:
+ 		case AVRCP_EVENT_TRACK_CHANGED:
+-		//case AVRCP_EVENT_SETTINGS_CHANGED:
++		case AVRCP_EVENT_SETTINGS_CHANGED:
+ 		case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
+-		//case AVRCP_EVENT_UIDS_CHANGED:
+-		//case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
++		case AVRCP_EVENT_UIDS_CHANGED:
++		case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
+ 		//case AVRCP_EVENT_VOLUME_CHANGED:
+ 			DBG("Event Supported: %d", event);
+ 			avrcp_register_notification(control_ptr, event);
+@@ -2929,6 +2930,16 @@ static void avrcp_track_changed(struct avctp *session,
+ 		avrcp_get_element_attributes(session);
+ }
+ 
++static void avrcp_available_players_changed(struct avctp *session,
++						struct avrcp_header *pdu)
++{
++	struct avrcp_server *server;
++	server = find_server(servers, avctp_get_src(session));
++	if(!server)
++		return;
++	avrcp_get_media_player_list(server);
++}
++
+ static void avrcp_addressed_player_changed(struct avctp *session,
+ 						struct avrcp_header *pdu)
+ {
+@@ -2985,14 +2996,13 @@ static gboolean avrcp_handle_event(struct avctp *conn,
+ 	if (code == AVC_CTYPE_CHANGED) {
+ 		switch (event){
+ 			case AVRCP_EVENT_TRACK_CHANGED:
+-			avrcp_register_notification(session, event);
+-			break;
+ 			case AVRCP_EVENT_STATUS_CHANGED:
+-			avrcp_register_notification(session, event);
+-			break;
+ 			case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
+-			avrcp_register_notification(session, event);
+-			break;
++			case AVRCP_EVENT_SETTINGS_CHANGED:
++			case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
++			case AVRCP_EVENT_UIDS_CHANGED:
++				avrcp_register_notification(session, event);
++				break;
+ 		}
+ 		//session->registered_events ^= (1 << event);
+ 		//avrcp_register_notification(session, event);
+@@ -3014,7 +3024,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
+ 		//avrcp_setting_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
+-		//avrcp_available_players_changed(session, pdu);
++		avrcp_available_players_changed(conn, pdu);
+ 		break;
+ 	case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
+ 		avrcp_addressed_player_changed(conn, pdu);

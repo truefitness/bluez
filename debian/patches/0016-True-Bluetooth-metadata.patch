@@ -914,4 +914,3 @@ index 2fe74d5..df525ad 100644
  #define VIDEO_CONF_SVCLASS_ID		0x110f
  #define INTERCOM_SVCLASS_ID		0x1110
  #define FAX_SVCLASS_ID			0x1111
--- 

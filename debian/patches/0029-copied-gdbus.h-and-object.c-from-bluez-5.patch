@@ -1,0 +1,1997 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Wed, 6 Aug 2014 16:33:10 -0500
+Subject: copied gdbus.h and object.c from bluez 5
+
+---
+ gdbus/gdbus.h  |  176 ++++++--
+ gdbus/object.c | 1338 +++++++++++++++++++++++++++++++++++++++-----------------
+ 2 files changed, 1078 insertions(+), 436 deletions(-)
+
+diff --git a/gdbus/gdbus.h b/gdbus/gdbus.h
+index 4666204..551c306 100644
+--- a/gdbus/gdbus.h
++++ b/gdbus/gdbus.h
+@@ -31,6 +31,11 @@ extern "C" {
+ #include <dbus/dbus.h>
+ #include <glib.h>
+ 
++typedef enum GDBusMethodFlags GDBusMethodFlags;
++typedef enum GDBusSignalFlags GDBusSignalFlags;
++typedef enum GDBusPropertyFlags GDBusPropertyFlags;
++typedef enum GDBusSecurityFlags GDBusSecurityFlags;
++
+ typedef struct GDBusArgInfo GDBusArgInfo;
+ typedef struct GDBusMethodTable GDBusMethodTable;
+ typedef struct GDBusSignalTable GDBusSignalTable;
+@@ -40,6 +45,9 @@ typedef struct GDBusSecurityTable GDBusSecurityTable;
+ typedef void (* GDBusWatchFunction) (DBusConnection *connection,
+ 							void *user_data);
+ 
++typedef void (* GDBusMessageFunction) (DBusConnection *connection,
++					 DBusMessage *message, void *user_data);
++
+ typedef gboolean (* GDBusSignalFunction) (DBusConnection *connection,
+ 					DBusMessage *message, void *user_data);
+ 
+@@ -80,33 +88,39 @@ typedef void (* GDBusSecurityFunction) (DBusConnection *connection,
+ 						gboolean interaction,
+ 						GDBusPendingReply pending);
+ 
+-typedef enum {
+-	G_DBUS_METHOD_FLAG_DEPRECATED = (1 << 0),
+-	G_DBUS_METHOD_FLAG_NOREPLY    = (1 << 1),
+-	G_DBUS_METHOD_FLAG_ASYNC      = (1 << 2),
+-} GDBusMethodFlags;
++enum GDBusFlags {
++	G_DBUS_FLAG_ENABLE_EXPERIMENTAL = (1 << 0),
++};
++
++enum GDBusMethodFlags {
++	G_DBUS_METHOD_FLAG_DEPRECATED   = (1 << 0),
++	G_DBUS_METHOD_FLAG_NOREPLY      = (1 << 1),
++	G_DBUS_METHOD_FLAG_ASYNC        = (1 << 2),
++	G_DBUS_METHOD_FLAG_EXPERIMENTAL = (1 << 3),
++};
+ 
+-typedef enum {
+-	G_DBUS_SIGNAL_FLAG_DEPRECATED = (1 << 0),
+-} GDBusSignalFlags;
++enum GDBusSignalFlags {
++	G_DBUS_SIGNAL_FLAG_DEPRECATED   = (1 << 0),
++	G_DBUS_SIGNAL_FLAG_EXPERIMENTAL = (1 << 1),
++};
+ 
+-typedef enum {
++enum GDBusPropertyFlags {
+ 	G_DBUS_PROPERTY_FLAG_DEPRECATED   = (1 << 0),
+ 	G_DBUS_PROPERTY_FLAG_EXPERIMENTAL = (1 << 1),
+-} GDBusPropertyFlags;
++};
+ 
+-typedef enum {
++enum GDBusSecurityFlags {
+ 	G_DBUS_SECURITY_FLAG_DEPRECATED        = (1 << 0),
+ 	G_DBUS_SECURITY_FLAG_BUILTIN           = (1 << 1),
+ 	G_DBUS_SECURITY_FLAG_ALLOW_INTERACTION = (1 << 2),
+-} GDBusSecurityFlags;
++};
+ 
+-struct GDBusArgInfo{
++struct GDBusArgInfo {
+ 	const char *name;
+ 	const char *signature;
+ };
+ 
+-struct GDBusMethodTable{
++struct GDBusMethodTable {
+ 	const char *name;
+ 	GDBusMethodFunction function;
+ 	GDBusMethodFlags flags;
+@@ -115,13 +129,13 @@ struct GDBusMethodTable{
+ 	const GDBusArgInfo *out_args;
+ };
+ 
+-struct GDBusSignalTable{
++struct GDBusSignalTable {
+ 	const char *name;
+ 	GDBusSignalFlags flags;
+ 	const GDBusArgInfo *args;
+ };
+ 
+-struct GDBusPropertyTable{
++struct GDBusPropertyTable {
+ 	const char *name;
+ 	const char *type;
+ 	GDBusPropertyGetter get;
+@@ -130,7 +144,7 @@ struct GDBusPropertyTable{
+ 	GDBusPropertyFlags flags;
+ };
+ 
+-struct GDBusSecurityTable{
++struct GDBusSecurityTable {
+ 	unsigned int privilege;
+ 	const char *action;
+ 	GDBusSecurityFlags flags;
+@@ -166,6 +180,20 @@ struct GDBusSecurityTable{
+ 	.function = _function, \
+ 	.flags = G_DBUS_METHOD_FLAG_ASYNC | G_DBUS_METHOD_FLAG_DEPRECATED
+ 
++#define GDBUS_EXPERIMENTAL_METHOD(_name, _in_args, _out_args, _function) \
++	.name = _name, \
++	.in_args = _in_args, \
++	.out_args = _out_args, \
++	.function = _function, \
++	.flags = G_DBUS_METHOD_FLAG_EXPERIMENTAL
++
++#define GDBUS_EXPERIMENTAL_ASYNC_METHOD(_name, _in_args, _out_args, _function) \
++	.name = _name, \
++	.in_args = _in_args, \
++	.out_args = _out_args, \
++	.function = _function, \
++	.flags = G_DBUS_METHOD_FLAG_ASYNC | G_DBUS_METHOD_FLAG_EXPERIMENTAL
++
+ #define GDBUS_NOREPLY_METHOD(_name, _in_args, _out_args, _function) \
+ 	.name = _name, \
+ 	.in_args = _in_args, \
+@@ -182,6 +210,13 @@ struct GDBusSecurityTable{
+ 	.args = _args, \
+ 	.flags = G_DBUS_SIGNAL_FLAG_DEPRECATED
+ 
++#define GDBUS_EXPERIMENTAL_SIGNAL(_name, _args) \
++	.name = _name, \
++	.args = _args, \
++	.flags = G_DBUS_SIGNAL_FLAG_EXPERIMENTAL
++
++void g_dbus_set_flags(int flags);
++
+ gboolean g_dbus_register_interface(DBusConnection *connection,
+ 					const char *path, const char *name,
+ 					const GDBusMethodTable *methods,
+@@ -215,6 +250,15 @@ DBusMessage *g_dbus_create_reply_valist(DBusMessage *message,
+ 						int type, va_list args);
+ 
+ gboolean g_dbus_send_message(DBusConnection *connection, DBusMessage *message);
++gboolean g_dbus_send_message_with_reply(DBusConnection *connection,
++					DBusMessage *message,
++					DBusPendingCall **call, int timeout);
++gboolean g_dbus_send_error(DBusConnection *connection, DBusMessage *message,
++				const char *name, const char *format, ...)
++					 __attribute__((format(printf, 4, 5)));
++gboolean g_dbus_send_error_valist(DBusConnection *connection,
++					DBusMessage *message, const char *name,
++					const char *format, va_list args);
+ gboolean g_dbus_send_reply(DBusConnection *connection,
+ 				DBusMessage *message, int type, ...);
+ gboolean g_dbus_send_reply_valist(DBusConnection *connection,
+@@ -226,16 +270,6 @@ gboolean g_dbus_emit_signal(DBusConnection *connection,
+ gboolean g_dbus_emit_signal_valist(DBusConnection *connection,
+ 				const char *path, const char *interface,
+ 				const char *name, int type, va_list args);
+-void g_dbus_pending_property_success(GDBusPendingPropertySet id);
+-void g_dbus_pending_property_error_valist(GDBusPendingReply id,
+-				const char *name, const char *format, va_list args);
+-void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
+-				const char *format, ...);
+-void g_dbus_emit_property_changed(DBusConnection *connection,
+-				const char *path, const char *interface,
+-				const char *name);
+-gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
+-				const char *interface, DBusMessageIter *iter);
+ 
+ guint g_dbus_add_service_watch(DBusConnection *connection, const char *name,
+ 				GDBusWatchFunction connect,
+@@ -249,10 +283,96 @@ guint g_dbus_add_signal_watch(DBusConnection *connection,
+ 				const char *interface, const char *member,
+ 				GDBusSignalFunction function, void *user_data,
+ 				GDBusDestroyFunction destroy);
+-				
++guint g_dbus_add_properties_watch(DBusConnection *connection,
++				const char *sender, const char *path,
++				const char *interface,
++				GDBusSignalFunction function, void *user_data,
++				GDBusDestroyFunction destroy);
+ gboolean g_dbus_remove_watch(DBusConnection *connection, guint tag);
+ void g_dbus_remove_all_watches(DBusConnection *connection);
+ 
++void g_dbus_pending_property_success(GDBusPendingPropertySet id);
++void g_dbus_pending_property_error_valist(GDBusPendingReply id,
++			const char *name, const char *format, va_list args);
++void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
++						const char *format, ...);
++void g_dbus_emit_property_changed(DBusConnection *connection,
++				const char *path, const char *interface,
++				const char *name);
++gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
++				const char *interface, DBusMessageIter *iter);
++
++gboolean g_dbus_attach_object_manager(DBusConnection *connection);
++gboolean g_dbus_detach_object_manager(DBusConnection *connection);
++
++typedef struct GDBusClient GDBusClient;
++typedef struct GDBusProxy GDBusProxy;
++
++GDBusProxy *g_dbus_proxy_new(GDBusClient *client, const char *path,
++							const char *interface);
++
++GDBusProxy *g_dbus_proxy_ref(GDBusProxy *proxy);
++void g_dbus_proxy_unref(GDBusProxy *proxy);
++
++const char *g_dbus_proxy_get_path(GDBusProxy *proxy);
++const char *g_dbus_proxy_get_interface(GDBusProxy *proxy);
++
++gboolean g_dbus_proxy_get_property(GDBusProxy *proxy, const char *name,
++							DBusMessageIter *iter);
++
++gboolean g_dbus_proxy_refresh_property(GDBusProxy *proxy, const char *name);
++
++typedef void (* GDBusResultFunction) (const DBusError *error, void *user_data);
++
++gboolean g_dbus_proxy_set_property_basic(GDBusProxy *proxy,
++				const char *name, int type, const void *value,
++				GDBusResultFunction function, void *user_data,
++				GDBusDestroyFunction destroy);
++
++gboolean g_dbus_proxy_set_property_array(GDBusProxy *proxy,
++				const char *name, int type, const void *value,
++				size_t size, GDBusResultFunction function,
++				void *user_data, GDBusDestroyFunction destroy);
++
++typedef void (* GDBusSetupFunction) (DBusMessageIter *iter, void *user_data);
++typedef void (* GDBusReturnFunction) (DBusMessage *message, void *user_data);
++
++gboolean g_dbus_proxy_method_call(GDBusProxy *proxy, const char *method,
++				GDBusSetupFunction setup,
++				GDBusReturnFunction function, void *user_data,
++				GDBusDestroyFunction destroy);
++
++typedef void (* GDBusClientFunction) (GDBusClient *client, void *user_data);
++typedef void (* GDBusProxyFunction) (GDBusProxy *proxy, void *user_data);
++typedef void (* GDBusPropertyFunction) (GDBusProxy *proxy, const char *name,
++					DBusMessageIter *iter, void *user_data);
++
++gboolean g_dbus_proxy_set_property_watch(GDBusProxy *proxy,
++			GDBusPropertyFunction function, void *user_data);
++
++gboolean g_dbus_proxy_set_removed_watch(GDBusProxy *proxy,
++			GDBusProxyFunction destroy, void *user_data);
++
++GDBusClient *g_dbus_client_new(DBusConnection *connection,
++					const char *service, const char *path);
++
++GDBusClient *g_dbus_client_ref(GDBusClient *client);
++void g_dbus_client_unref(GDBusClient *client);
++
++gboolean g_dbus_client_set_connect_watch(GDBusClient *client,
++				GDBusWatchFunction function, void *user_data);
++gboolean g_dbus_client_set_disconnect_watch(GDBusClient *client,
++				GDBusWatchFunction function, void *user_data);
++gboolean g_dbus_client_set_signal_watch(GDBusClient *client,
++				GDBusMessageFunction function, void *user_data);
++gboolean g_dbus_client_set_ready_watch(GDBusClient *client,
++				GDBusClientFunction ready, void *user_data);
++gboolean g_dbus_client_set_proxy_handlers(GDBusClient *client,
++					GDBusProxyFunction proxy_added,
++					GDBusProxyFunction proxy_removed,
++					GDBusPropertyFunction property_changed,
++					void *user_data);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/gdbus/object.c b/gdbus/object.c
+index 4a50401..13cf9a9 100644
+--- a/gdbus/object.c
++++ b/gdbus/object.c
+@@ -39,6 +39,14 @@
+ 
+ #define DBUS_INTERFACE_OBJECT_MANAGER "org.freedesktop.DBus.ObjectManager"
+ 
++#ifndef DBUS_ERROR_UNKNOWN_PROPERTY
++#define DBUS_ERROR_UNKNOWN_PROPERTY "org.freedesktop.DBus.Error.UnknownProperty"
++#endif
++
++#ifndef DBUS_ERROR_PROPERTY_READ_ONLY
++#define DBUS_ERROR_PROPERTY_READ_ONLY "org.freedesktop.DBus.Error.PropertyReadOnly"
++#endif
++
+ struct generic_data {
+ 	unsigned int refcount;
+ 	DBusConnection *conn;
+@@ -76,15 +84,21 @@ struct property_data {
+ 	DBusMessage *message;
+ };
+ 
+-static GSList *pending = NULL;
++static int global_flags = 0;
+ static struct generic_data *root;
++static GSList *pending = NULL;
++
++static gboolean process_changes(gpointer user_data);
++static void process_properties_from_interface(struct generic_data *data,
++						struct interface_data *iface);
++static void process_property_changes(struct generic_data *data);
+ 
+ static void print_arguments(GString *gstr, const GDBusArgInfo *args,
+ 						const char *direction)
+ {
+ 	for (; args && args->name; args++) {
+ 		g_string_append_printf(gstr,
+-					"\t\t\t<arg name=\"%s\" type=\"%s\"",
++					"<arg name=\"%s\" type=\"%s\"",
+ 					args->name, args->signature);
+ 
+ 		if (direction)
+@@ -96,55 +110,83 @@ static void print_arguments(GString *gstr, const GDBusArgInfo *args,
+ 	}
+ }
+ 
++#define G_DBUS_ANNOTATE(name_, value_)				\
++	"<annotation name=\"org.freedesktop.DBus." name_ "\" "	\
++	"value=\"" value_ "\"/>"
++
++#define G_DBUS_ANNOTATE_DEPRECATED \
++	G_DBUS_ANNOTATE("Deprecated", "true")
++
++#define G_DBUS_ANNOTATE_NOREPLY \
++	G_DBUS_ANNOTATE("Method.NoReply", "true")
++
++static gboolean check_experimental(int flags, int flag)
++{
++	if (!(flags & flag))
++		return FALSE;
++
++	return !(global_flags & G_DBUS_FLAG_ENABLE_EXPERIMENTAL);
++}
++
+ static void generate_interface_xml(GString *gstr, struct interface_data *iface)
+ {
+ 	const GDBusMethodTable *method;
+ 	const GDBusSignalTable *signal;
++	const GDBusPropertyTable *property;
+ 
+ 	for (method = iface->methods; method && method->name; method++) {
+-		gboolean deprecated = method->flags &
+-						G_DBUS_METHOD_FLAG_DEPRECATED;
+-		gboolean noreply = method->flags &
+-						G_DBUS_METHOD_FLAG_NOREPLY;
+-
+-		if (!deprecated && !noreply &&
+-				!(method->in_args && method->in_args->name) &&
+-				!(method->out_args && method->out_args->name))
+-			g_string_append_printf(gstr, "\t\t<method name=\"%s\"/>\n",
+-								method->name);
+-		else {
+-			g_string_append_printf(gstr, "\t\t<method name=\"%s\">\n",
++		if (check_experimental(method->flags,
++					G_DBUS_METHOD_FLAG_EXPERIMENTAL))
++			continue;
++
++		g_string_append_printf(gstr, "<method name=\"%s\">",
+ 								method->name);
+-			print_arguments(gstr, method->in_args, "in");
+-			print_arguments(gstr, method->out_args, "out");
++		print_arguments(gstr, method->in_args, "in");
++		print_arguments(gstr, method->out_args, "out");
+ 
+-			if (deprecated)
+-				g_string_append_printf(gstr, "\t\t\t<annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/>\n");
++		if (method->flags & G_DBUS_METHOD_FLAG_DEPRECATED)
++			g_string_append_printf(gstr,
++						G_DBUS_ANNOTATE_DEPRECATED);
+ 
+-			if (noreply)
+-				g_string_append_printf(gstr, "\t\t\t<annotation name=\"org.freedesktop.DBus.Method.NoReply\" value=\"true\"/>\n");
++		if (method->flags & G_DBUS_METHOD_FLAG_NOREPLY)
++			g_string_append_printf(gstr, G_DBUS_ANNOTATE_NOREPLY);
+ 
+-			g_string_append_printf(gstr, "\t\t</method>\n");
+-		}
++		g_string_append_printf(gstr, "</method>");
+ 	}
+ 
+ 	for (signal = iface->signals; signal && signal->name; signal++) {
+-		gboolean deprecated = signal->flags &
+-						G_DBUS_SIGNAL_FLAG_DEPRECATED;
++		if (check_experimental(signal->flags,
++					G_DBUS_SIGNAL_FLAG_EXPERIMENTAL))
++			continue;
+ 
+-		if (!deprecated && !(signal->args && signal->args->name))
+-			g_string_append_printf(gstr, "\t\t<signal name=\"%s\"/>\n",
+-								signal->name);
+-		else {
+-			g_string_append_printf(gstr, "\t\t<signal name=\"%s\">\n",
++		g_string_append_printf(gstr, "<signal name=\"%s\">",
+ 								signal->name);
+-			print_arguments(gstr, signal->args, NULL);
++		print_arguments(gstr, signal->args, NULL);
+ 
+-			if (deprecated)
+-				g_string_append_printf(gstr, "\t\t\t<annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/>\n");
++		if (signal->flags & G_DBUS_SIGNAL_FLAG_DEPRECATED)
++			g_string_append_printf(gstr,
++						G_DBUS_ANNOTATE_DEPRECATED);
+ 
+-			g_string_append_printf(gstr, "\t\t</signal>\n");
+-		}
++		g_string_append_printf(gstr, "</signal>\n");
++	}
++
++	for (property = iface->properties; property && property->name;
++								property++) {
++		if (check_experimental(property->flags,
++					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++			continue;
++
++		g_string_append_printf(gstr, "<property name=\"%s\""
++					" type=\"%s\" access=\"%s%s\">",
++					property->name,	property->type,
++					property->get ? "read" : "",
++					property->set ? "write" : "");
++
++		if (property->flags & G_DBUS_PROPERTY_FLAG_DEPRECATED)
++			g_string_append_printf(gstr,
++						G_DBUS_ANNOTATE_DEPRECATED);
++
++		g_string_append_printf(gstr, "</property>");
+ 	}
+ }
+ 
+@@ -160,30 +202,30 @@ static void generate_introspection_xml(DBusConnection *conn,
+ 
+ 	gstr = g_string_new(DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE);
+ 
+-	g_string_append_printf(gstr, "<node>\n");
++	g_string_append_printf(gstr, "<node>");
+ 
+ 	for (list = data->interfaces; list; list = list->next) {
+ 		struct interface_data *iface = list->data;
+ 
+-		g_string_append_printf(gstr, "\t<interface name=\"%s\">\n",
++		g_string_append_printf(gstr, "<interface name=\"%s\">",
+ 								iface->name);
+ 
+ 		generate_interface_xml(gstr, iface);
+ 
+-		g_string_append_printf(gstr, "\t</interface>\n");
++		g_string_append_printf(gstr, "</interface>");
+ 	}
+ 
+ 	if (!dbus_connection_list_registered(conn, path, &children))
+ 		goto done;
+ 
+ 	for (i = 0; children[i]; i++)
+-		g_string_append_printf(gstr, "\t<node name=\"%s\"/>\n",
++		g_string_append_printf(gstr, "<node name=\"%s\"/>",
+ 								children[i]);
+ 
+ 	dbus_free_string_array(children);
+ 
+ done:
+-	g_string_append_printf(gstr, "</node>\n");
++	g_string_append_printf(gstr, "</node>");
+ 
+ 	data->introspect = g_string_free(gstr, FALSE);
+ }
+@@ -230,8 +272,7 @@ static DBusHandlerResult process_message(DBusConnection *connection,
+ 	if (reply == NULL)
+ 		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+ 
+-	dbus_connection_send(connection, reply, NULL);
+-	dbus_message_unref(reply);
++	g_dbus_send_message(connection, reply);
+ 
+ 	return DBUS_HANDLER_RESULT_HANDLED;
+ }
+@@ -246,7 +287,7 @@ void g_dbus_pending_success(DBusConnection *connection,
+ {
+ 	GSList *list;
+ 
+-        for (list = pending_security; list; list = list->next) {
++	for (list = pending_security; list; list = list->next) {
+ 		struct security_data *secdata = list->data;
+ 
+ 		if (secdata->pending != pending)
+@@ -260,7 +301,7 @@ void g_dbus_pending_success(DBusConnection *connection,
+ 		dbus_message_unref(secdata->message);
+ 		g_free(secdata);
+ 		return;
+-        }
++	}
+ }
+ 
+ void g_dbus_pending_error_valist(DBusConnection *connection,
+@@ -269,26 +310,21 @@ void g_dbus_pending_error_valist(DBusConnection *connection,
+ {
+ 	GSList *list;
+ 
+-        for (list = pending_security; list; list = list->next) {
++	for (list = pending_security; list; list = list->next) {
+ 		struct security_data *secdata = list->data;
+-		DBusMessage *reply;
+ 
+ 		if (secdata->pending != pending)
+ 			continue;
+ 
+ 		pending_security = g_slist_remove(pending_security, secdata);
+ 
+-		reply = g_dbus_create_error_valist(secdata->message,
++		g_dbus_send_error_valist(connection, secdata->message,
+ 							name, format, args);
+-		if (reply != NULL) {
+-			dbus_connection_send(connection, reply, NULL);
+-			dbus_message_unref(reply);
+-		}
+ 
+ 		dbus_message_unref(secdata->message);
+ 		g_free(secdata);
+ 		return;
+-        }
++	}
+ }
+ 
+ void g_dbus_pending_error(DBusConnection *connection,
+@@ -384,58 +420,80 @@ static gboolean check_privilege(DBusConnection *conn, DBusMessage *msg,
+ 	return FALSE;
+ }
+ 
+-static void generic_unregister(DBusConnection *connection, void *user_data)
++static GDBusPendingPropertySet next_pending_property = 1;
++static GSList *pending_property_set;
++
++static struct property_data *remove_pending_property_data(
++						GDBusPendingPropertySet id)
+ {
+-	struct generic_data *data = user_data;
++	struct property_data *propdata;
++	GSList *l;
+ 
+-	g_free(data->introspect);
+-	g_free(data);
+-}
++	for (l = pending_property_set; l != NULL; l = l->next) {
++		propdata = l->data;
++		if (propdata->id != id)
++			continue;
+ 
+-static struct interface_data *find_interface(GSList *interfaces,
+-						const char *name)
+-{
+-	GSList *list;
++		break;
++	}
+ 
+-	if (name == NULL)
++	if (l == NULL)
+ 		return NULL;
+ 
+-	for (list = interfaces; list; list = list->next) {
+-		struct interface_data *iface = list->data;
+-		if (!strcmp(name, iface->name))
+-			return iface;
+-	}
++	pending_property_set = g_slist_delete_link(pending_property_set, l);
+ 
+-	return NULL;
++	return propdata;
+ }
+ 
+-static inline const GDBusPropertyTable *find_property(const GDBusPropertyTable *properties,
+-							const char *name)
++void g_dbus_pending_property_success(GDBusPendingPropertySet id)
+ {
+-	const GDBusPropertyTable *p;
++	struct property_data *propdata;
+ 
+-	for (p = properties; p && p->name; p++) {
+-		if (strcmp(name, p->name) != 0)
+-			continue;
++	propdata = remove_pending_property_data(id);
++	if (propdata == NULL)
++		return;
+ 
+-		//if (check_experimental(p->flags,
+-		//			G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
+-		//	break;
++	g_dbus_send_reply(propdata->conn, propdata->message,
++							DBUS_TYPE_INVALID);
++	dbus_message_unref(propdata->message);
++	g_free(propdata);
++}
+ 
+-		return p;
+-	}
++void g_dbus_pending_property_error_valist(GDBusPendingReply id,
++					const char *name, const char *format,
++					va_list args)
++{
++	struct property_data *propdata;
+ 
+-	return NULL;
++	propdata = remove_pending_property_data(id);
++	if (propdata == NULL)
++		return;
++
++	g_dbus_send_error_valist(propdata->conn, propdata->message, name,
++								format, args);
++
++	dbus_message_unref(propdata->message);
++	g_free(propdata);
+ }
+ 
+-static void remove_pending(struct generic_data *data)
++void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
++						const char *format, ...)
+ {
+-	if (data->process_id > 0) {
+-		g_source_remove(data->process_id);
+-		data->process_id = 0;
+-	}
++	va_list args;
+ 
+-	pending = g_slist_remove(pending, data);
++	va_start(args, format);
++
++	g_dbus_pending_property_error_valist(id, name, format, args);
++
++	va_end(args);
++}
++
++static void reset_parent(gpointer data, gpointer user_data)
++{
++	struct generic_data *child = data;
++	struct generic_data *parent = user_data;
++
++	child->parent = parent;
+ }
+ 
+ static void append_property(struct interface_data *iface,
+@@ -468,9 +526,9 @@ static void append_properties(struct interface_data *data,
+ 				DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
+ 
+ 	for (p = data->properties; p && p->name; p++) {
+-		//if (check_experimental(p->flags,
+-		//			G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
+-		//	continue;
++		if (check_experimental(p->flags,
++					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++			continue;
+ 
+ 		if (p->get == NULL)
+ 			continue;
+@@ -497,90 +555,6 @@ static void append_interface(gpointer data, gpointer user_data)
+ 	dbus_message_iter_close_container(array, &entry);
+ }
+ 
+-static GDBusPendingPropertySet next_pending_property = 1;
+-static GSList *pending_property_set;
+-
+-static struct property_data *remove_pending_property_data(
+-						GDBusPendingPropertySet id)
+-{
+-	struct property_data *propdata;
+-	GSList *l;
+-
+-	for (l = pending_property_set; l != NULL; l = l->next) {
+-		propdata = l->data;
+-		if (propdata->id != id)
+-			continue;
+-
+-		break;
+-	}
+-
+-	if (l == NULL)
+-		return NULL;
+-
+-	pending_property_set = g_slist_delete_link(pending_property_set, l);
+-
+-	return propdata;
+-}
+-
+-void g_dbus_pending_property_success(GDBusPendingPropertySet id)
+-{
+-	struct property_data *propdata;
+-
+-	propdata = remove_pending_property_data(id);
+-	if (propdata == NULL)
+-		return;
+-
+-	g_dbus_send_reply(propdata->conn, propdata->message,
+-							DBUS_TYPE_INVALID);
+-	dbus_message_unref(propdata->message);
+-	g_free(propdata);
+-}
+-
+-gboolean g_dbus_send_error_valist(DBusConnection *connection,
+-					DBusMessage *message, const char *name,
+-					const char *format, va_list args)
+-{
+-	DBusMessage *error;
+-	char str[1024];
+-
+-	vsnprintf(str, sizeof(str), format, args);
+-
+-	error = dbus_message_new_error(message, name, str);
+-	if (error == NULL)
+-		return FALSE;
+-
+-	return g_dbus_send_message(connection, error);
+-}
+-
+-void g_dbus_pending_property_error_valist(GDBusPendingReply id,
+-					const char *name, const char *format,
+-					va_list args)
+-{
+-	struct property_data *propdata;
+-
+-	propdata = remove_pending_property_data(id);
+-	if (propdata == NULL)
+-		return;
+-
+-	g_dbus_send_error_valist(propdata->conn, propdata->message, name,
+-								format, args);
+-
+-	dbus_message_unref(propdata->message);
+-	g_free(propdata);
+-}
+-
+-void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
+-						const char *format, ...)
+-{
+-	va_list args;
+-
+-	va_start(args, format);
+-
+-	g_dbus_pending_property_error_valist(id, name, format, args);
+-
+-	va_end(args);
+-}
+-
+ static void emit_interfaces_added(struct generic_data *data)
+ {
+ 	DBusMessage *signal;
+@@ -620,216 +594,444 @@ static void emit_interfaces_added(struct generic_data *data)
+ 	dbus_message_unref(signal);
+ }
+ 
+-static void append_name(gpointer data, gpointer user_data)
++static struct interface_data *find_interface(GSList *interfaces,
++						const char *name)
+ {
+-	char *name = data;
+-	DBusMessageIter *iter = user_data;
++	GSList *list;
+ 
+-	dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &name);
++	if (name == NULL)
++		return NULL;
++
++	for (list = interfaces; list; list = list->next) {
++		struct interface_data *iface = list->data;
++		if (!strcmp(name, iface->name))
++			return iface;
++	}
++
++	return NULL;
+ }
+ 
+-static void emit_interfaces_removed(struct generic_data *data)
++static gboolean g_dbus_args_have_signature(const GDBusArgInfo *args,
++							DBusMessage *message)
+ {
+-	DBusMessage *signal;
+-	DBusMessageIter iter, array;
++	const char *sig = dbus_message_get_signature(message);
++	const char *p = NULL;
+ 
+-	if (root == NULL || data == root)
+-		return;
++	for (; args && args->signature && *sig; args++) {
++		p = args->signature;
+ 
+-	signal = dbus_message_new_signal(root->path,
+-					DBUS_INTERFACE_OBJECT_MANAGER,
+-					"InterfacesRemoved");
+-	if (signal == NULL)
+-		return;
++		for (; *sig && *p; sig++, p++) {
++			if (*p != *sig)
++				return FALSE;
++		}
++	}
+ 
+-	dbus_message_iter_init_append(signal, &iter);
+-	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH,
+-								&data->path);
+-	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
+-					DBUS_TYPE_STRING_AS_STRING, &array);
++	if (*sig || (p && *p) || (args && args->signature))
++		return FALSE;
+ 
+-	g_slist_foreach(data->removed, append_name, &array);
+-	g_slist_free_full(data->removed, g_free);
+-	data->removed = NULL;
++	return TRUE;
++}
+ 
+-	dbus_message_iter_close_container(&iter, &array);
++static void add_pending(struct generic_data *data)
++{
++	if (data->process_id > 0)
++		return;
+ 
+-	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
+-	dbus_connection_send(data->conn, signal, NULL);
+-	dbus_message_unref(signal);
++	data->process_id = g_idle_add(process_changes, data);
++
++	pending = g_slist_append(pending, data);
+ }
+ 
+-static void process_properties_from_interface(struct generic_data *data,
+-						struct interface_data *iface)
++static gboolean remove_interface(struct generic_data *data, const char *name)
+ {
+-	GSList *l;
+-	DBusMessage *signal;
+-	DBusMessageIter iter, dict, array;
+-	GSList *invalidated;
++	struct interface_data *iface;
+ 
+-	data->pending_prop = FALSE;
++	iface = find_interface(data->interfaces, name);
++	if (iface == NULL)
++		return FALSE;
+ 
+-	if (iface->pending_prop == NULL)
+-		return;
++	process_properties_from_interface(data, iface);
+ 
+-	signal = dbus_message_new_signal(data->path,
+-			DBUS_INTERFACE_PROPERTIES, "PropertiesChanged");
+-	if (signal == NULL) {
+-		error("Unable to allocate new " DBUS_INTERFACE_PROPERTIES
+-						".PropertiesChanged signal");
+-		return;
++	data->interfaces = g_slist_remove(data->interfaces, iface);
++
++	if (iface->destroy) {
++		iface->destroy(iface->user_data);
++		iface->user_data = NULL;
+ 	}
+ 
+-	iface->pending_prop = g_slist_reverse(iface->pending_prop);
++	/*
++	 * Interface being removed was just added, on the same mainloop
++	 * iteration? Don't send any signal
++	 */
++	if (g_slist_find(data->added, iface)) {
++		data->added = g_slist_remove(data->added, iface);
++		g_free(iface->name);
++		g_free(iface);
++		return TRUE;
++	}
+ 
+-	dbus_message_iter_init_append(signal, &iter);
+-	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING,	&iface->name);
+-	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
+-			DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
+-			DBUS_TYPE_STRING_AS_STRING DBUS_TYPE_VARIANT_AS_STRING
+-			DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
++	if (data->parent == NULL) {
++		g_free(iface->name);
++		g_free(iface);
++		return TRUE;
++	}
+ 
+-	invalidated = NULL;
++	data->removed = g_slist_prepend(data->removed, iface->name);
++	g_free(iface);
+ 
+-	for (l = iface->pending_prop; l != NULL; l = l->next) {
+-		GDBusPropertyTable *p = l->data;
++	add_pending(data);
+ 
+-		if (p->get == NULL)
+-			continue;
++	return TRUE;
++}
+ 
+-		if (p->exists != NULL && !p->exists(p, iface->user_data)) {
+-			invalidated = g_slist_prepend(invalidated, p);
+-			continue;
+-		}
++static struct generic_data *invalidate_parent_data(DBusConnection *conn,
++						const char *child_path)
++{
++	struct generic_data *data = NULL, *child = NULL, *parent = NULL;
++	char *parent_path, *slash;
+ 
+-		append_property(iface, p, &dict);
+-	}
++	parent_path = g_strdup(child_path);
++	slash = strrchr(parent_path, '/');
++	if (slash == NULL)
++		goto done;
+ 
+-	dbus_message_iter_close_container(&iter, &dict);
++	if (slash == parent_path && parent_path[1] != '\0')
++		parent_path[1] = '\0';
++	else
++		*slash = '\0';
+ 
+-	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
+-				DBUS_TYPE_STRING_AS_STRING, &array);
+-	for (l = invalidated; l != NULL; l = g_slist_next(l)) {
+-		GDBusPropertyTable *p = l->data;
++	if (!strlen(parent_path))
++		goto done;
+ 
+-		dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING,
+-								&p->name);
++	if (dbus_connection_get_object_path_data(conn, parent_path,
++							(void *) &data) == FALSE) {
++		goto done;
+ 	}
+-	g_slist_free(invalidated);
+-	dbus_message_iter_close_container(&iter, &array);
+ 
+-	g_slist_free(iface->pending_prop);
+-	iface->pending_prop = NULL;
++	parent = invalidate_parent_data(conn, parent_path);
+ 
+-	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
+-	dbus_connection_send(data->conn, signal, NULL);
+-	dbus_message_unref(signal);
++	if (data == NULL) {
++		data = parent;
++		if (data == NULL)
++			goto done;
++	}
++
++	g_free(data->introspect);
++	data->introspect = NULL;
++
++	if (!dbus_connection_get_object_path_data(conn, child_path,
++							(void *) &child))
++		goto done;
++
++	if (child == NULL || g_slist_find(data->objects, child) != NULL)
++		goto done;
++
++	data->objects = g_slist_prepend(data->objects, child);
++	child->parent = data;
++
++done:
++	g_free(parent_path);
++	return data;
+ }
+ 
+-static void process_property_changes(struct generic_data *data)
++static inline const GDBusPropertyTable *find_property(const GDBusPropertyTable *properties,
++							const char *name)
+ {
+-	GSList *l;
++	const GDBusPropertyTable *p;
+ 
+-	for (l = data->interfaces; l != NULL; l = l->next) {
+-		struct interface_data *iface = l->data;
++	for (p = properties; p && p->name; p++) {
++		if (strcmp(name, p->name) != 0)
++			continue;
+ 
+-		process_properties_from_interface(data, iface);
++		if (check_experimental(p->flags,
++					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++			break;
++
++		return p;
+ 	}
++
++	return NULL;
+ }
+ 
+-static gboolean process_changes(gpointer user_data)
++static DBusMessage *properties_get(DBusConnection *connection,
++					DBusMessage *message, void *user_data)
+ {
+ 	struct generic_data *data = user_data;
++	struct interface_data *iface;
++	const GDBusPropertyTable *property;
++	const char *interface, *name;
++	DBusMessageIter iter, value;
++	DBusMessage *reply;
+ 
+-	remove_pending(data);
++	if (!dbus_message_get_args(message, NULL,
++					DBUS_TYPE_STRING, &interface,
++					DBUS_TYPE_STRING, &name,
++					DBUS_TYPE_INVALID))
++		return NULL;
+ 
+-	if (data->added != NULL)
+-		emit_interfaces_added(data);
++	iface = find_interface(data->interfaces, interface);
++	if (iface == NULL)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++				"No such interface '%s'", interface);
+ 
+-	/* Flush pending properties */
+-	if (data->pending_prop == TRUE)
+-		process_property_changes(data);
++	property = find_property(iface->properties, name);
++	if (property == NULL)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++				"No such property '%s'", name);
+ 
+-	if (data->removed != NULL)
+-		emit_interfaces_removed(data);
++	if (property->exists != NULL &&
++			!property->exists(property, iface->user_data))
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"No such property '%s'", name);
+ 
+-	data->process_id = 0;
++	if (property->get == NULL)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++				"Property '%s' is not readable", name);
+ 
+-	return FALSE;
++	reply = dbus_message_new_method_return(message);
++	if (reply == NULL)
++		return NULL;
++
++	dbus_message_iter_init_append(reply, &iter);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT,
++						property->type, &value);
++
++	if (!property->get(property, &value, iface->user_data)) {
++		dbus_message_unref(reply);
++		return NULL;
++	}
++
++	dbus_message_iter_close_container(&iter, &value);
++
++	return reply;
+ }
+ 
+-static void add_pending(struct generic_data *data)
++static DBusMessage *properties_get_all(DBusConnection *connection,
++					DBusMessage *message, void *user_data)
+ {
+-	if (data->process_id > 0)
+-		return;
++	struct generic_data *data = user_data;
++	struct interface_data *iface;
++	const char *interface;
++	DBusMessageIter iter;
++	DBusMessage *reply;
+ 
+-	data->process_id = g_idle_add(process_changes, data);
++	if (!dbus_message_get_args(message, NULL,
++					DBUS_TYPE_STRING, &interface,
++					DBUS_TYPE_INVALID))
++		return NULL;
+ 
+-	pending = g_slist_append(pending, data);
++	iface = find_interface(data->interfaces, interface);
++	if (iface == NULL)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"No such interface '%s'", interface);
++
++	reply = dbus_message_new_method_return(message);
++	if (reply == NULL)
++		return NULL;
++
++	dbus_message_iter_init_append(reply, &iter);
++
++	append_properties(iface, &iter);
++
++	return reply;
+ }
+ 
+-void g_dbus_emit_property_changed(DBusConnection *connection,
+-				const char *path, const char *interface,
+-				const char *name)
++static DBusMessage *properties_set(DBusConnection *connection,
++					DBusMessage *message, void *user_data)
+ {
+-	const GDBusPropertyTable *property;
+-	struct generic_data *data;
++	struct generic_data *data = user_data;
++	DBusMessageIter iter, sub;
+ 	struct interface_data *iface;
++	const GDBusPropertyTable *property;
++	const char *name, *interface;
++	struct property_data *propdata;
++	gboolean valid_signature;
++	char *signature;
+ 
+-	if (path == NULL)
+-		return;
++	if (!dbus_message_iter_init(message, &iter))
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++							"No arguments given");
+ 
+-	if (!dbus_connection_get_object_path_data(connection, path,
+-					(void **) &data) || data == NULL)
+-		return;
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_STRING)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"Invalid argument type: '%c'",
++					dbus_message_iter_get_arg_type(&iter));
++
++	dbus_message_iter_get_basic(&iter, &interface);
++	dbus_message_iter_next(&iter);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_STRING)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"Invalid argument type: '%c'",
++					dbus_message_iter_get_arg_type(&iter));
++
++	dbus_message_iter_get_basic(&iter, &name);
++	dbus_message_iter_next(&iter);
++
++	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_VARIANT)
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"Invalid argument type: '%c'",
++					dbus_message_iter_get_arg_type(&iter));
++
++	dbus_message_iter_recurse(&iter, &sub);
+ 
+ 	iface = find_interface(data->interfaces, interface);
+ 	if (iface == NULL)
+-		return;
++		return g_dbus_create_error(message, DBUS_ERROR_INVALID_ARGS,
++					"No such interface '%s'", interface);
+ 
+-	/*
+-	 * If ObjectManager is attached, don't emit property changed if
+-	 * interface is not yet published
+-	 */
+-	if (g_slist_find(data->added, iface))
++	property = find_property(iface->properties, name);
++	if (property == NULL)
++		return g_dbus_create_error(message,
++						DBUS_ERROR_UNKNOWN_PROPERTY,
++						"No such property '%s'", name);
++
++	if (property->set == NULL)
++		return g_dbus_create_error(message,
++					DBUS_ERROR_PROPERTY_READ_ONLY,
++					"Property '%s' is not writable", name);
++
++	if (property->exists != NULL &&
++			!property->exists(property, iface->user_data))
++		return g_dbus_create_error(message,
++						DBUS_ERROR_UNKNOWN_PROPERTY,
++						"No such property '%s'", name);
++
++	signature = dbus_message_iter_get_signature(&sub);
++	valid_signature = strcmp(signature, property->type) ? FALSE : TRUE;
++	dbus_free(signature);
++	if (!valid_signature)
++		return g_dbus_create_error(message,
++					DBUS_ERROR_INVALID_SIGNATURE,
++					"Invalid signature for '%s'", name);
++
++	propdata = g_new(struct property_data, 1);
++	propdata->id = next_pending_property++;
++	propdata->message = dbus_message_ref(message);
++	propdata->conn = connection;
++	pending_property_set = g_slist_prepend(pending_property_set, propdata);
++
++	property->set(property, &sub, propdata->id, iface->user_data);
++
++	return NULL;
++}
++
++static const GDBusMethodTable properties_methods[] = {
++	{ GDBUS_METHOD("Get",
++			GDBUS_ARGS({ "interface", "s" }, { "name", "s" }),
++			GDBUS_ARGS({ "value", "v" }),
++			properties_get) },
++	{ GDBUS_ASYNC_METHOD("Set",
++			GDBUS_ARGS({ "interface", "s" }, { "name", "s" },
++							{ "value", "v" }),
++			NULL,
++			properties_set) },
++	{ GDBUS_METHOD("GetAll",
++			GDBUS_ARGS({ "interface", "s" }),
++			GDBUS_ARGS({ "properties", "a{sv}" }),
++			properties_get_all) },
++	{ }
++};
++
++static const GDBusSignalTable properties_signals[] = {
++	{ GDBUS_SIGNAL("PropertiesChanged",
++			GDBUS_ARGS({ "interface", "s" },
++					{ "changed_properties", "a{sv}" },
++					{ "invalidated_properties", "as"})) },
++	{ }
++};
++
++static void append_name(gpointer data, gpointer user_data)
++{
++	char *name = data;
++	DBusMessageIter *iter = user_data;
++
++	dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &name);
++}
++
++static void emit_interfaces_removed(struct generic_data *data)
++{
++	DBusMessage *signal;
++	DBusMessageIter iter, array;
++
++	if (root == NULL || data == root)
+ 		return;
+ 
+-	property = find_property(iface->properties, name);
+-	if (property == NULL) {
+-		error("Could not find property %s in %p", name,
+-							iface->properties);
++	signal = dbus_message_new_signal(root->path,
++					DBUS_INTERFACE_OBJECT_MANAGER,
++					"InterfacesRemoved");
++	if (signal == NULL)
+ 		return;
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH,
++								&data->path);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++					DBUS_TYPE_STRING_AS_STRING, &array);
++
++	g_slist_foreach(data->removed, append_name, &array);
++	g_slist_free_full(data->removed, g_free);
++	data->removed = NULL;
++
++	dbus_message_iter_close_container(&iter, &array);
++
++	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
++	dbus_connection_send(data->conn, signal, NULL);
++	dbus_message_unref(signal);
++}
++
++static void remove_pending(struct generic_data *data)
++{
++	if (data->process_id > 0) {
++		g_source_remove(data->process_id);
++		data->process_id = 0;
+ 	}
+ 
+-	if (g_slist_find(iface->pending_prop, (void *) property) != NULL)
+-		return;
++	pending = g_slist_remove(pending, data);
++}
+ 
+-	data->pending_prop = TRUE;
+-	iface->pending_prop = g_slist_prepend(iface->pending_prop,
+-						(void *) property);
++static gboolean process_changes(gpointer user_data)
++{
++	struct generic_data *data = user_data;
+ 
+-	add_pending(data);
++	remove_pending(data);
++
++	if (data->added != NULL)
++		emit_interfaces_added(data);
++
++	/* Flush pending properties */
++	if (data->pending_prop == TRUE)
++		process_property_changes(data);
++
++	if (data->removed != NULL)
++		emit_interfaces_removed(data);
++
++	data->process_id = 0;
++
++	return FALSE;
+ }
+ 
+-static gboolean g_dbus_args_have_signature(const GDBusArgInfo *args,
+-							DBusMessage *message)
++static void generic_unregister(DBusConnection *connection, void *user_data)
+ {
+-	const char *sig = dbus_message_get_signature(message);
+-	const char *p = NULL;
++	struct generic_data *data = user_data;
++	struct generic_data *parent = data->parent;
+ 
+-	for (; args && args->signature && *sig; args++) {
+-		p = args->signature;
++	if (parent != NULL)
++		parent->objects = g_slist_remove(parent->objects, data);
+ 
+-		for (; *sig && *p; sig++, p++) {
+-			if (*p != *sig)
+-				return FALSE;
+-		}
++	if (data->process_id > 0) {
++		g_source_remove(data->process_id);
++		data->process_id = 0;
++		process_changes(data);
+ 	}
+ 
+-	if (*sig || (p && *p) || (args && args->signature))
+-		return FALSE;
++	g_slist_foreach(data->objects, reset_parent, data->parent);
++	g_slist_free(data->objects);
+ 
+-	return TRUE;
++	dbus_connection_unref(data->conn);
++	g_free(data->introspect);
++	g_free(data->path);
++	g_free(data);
+ }
+ 
+ static DBusHandlerResult generic_message(DBusConnection *connection,
+@@ -848,10 +1050,15 @@ static DBusHandlerResult generic_message(DBusConnection *connection,
+ 
+ 	for (method = iface->methods; method &&
+ 			method->name && method->function; method++) {
++
+ 		if (dbus_message_is_method_call(message, iface->name,
+ 							method->name) == FALSE)
+ 			continue;
+ 
++		if (check_experimental(method->flags,
++					G_DBUS_METHOD_FLAG_EXPERIMENTAL))
++			return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++
+ 		if (g_dbus_args_have_signature(method->in_args,
+ 							message) == FALSE)
+ 			continue;
+@@ -872,48 +1079,106 @@ static DBusObjectPathVTable generic_table = {
+ 	.message_function	= generic_message,
+ };
+ 
+-static void invalidate_parent_data(DBusConnection *conn, const char *child_path)
+-{
+-	struct generic_data *data = NULL;
+-	char *parent_path, *slash;
++static const GDBusMethodTable introspect_methods[] = {
++	{ GDBUS_METHOD("Introspect", NULL,
++			GDBUS_ARGS({ "xml", "s" }), introspect) },
++	{ }
++};
+ 
+-	parent_path = g_strdup(child_path);
+-	slash = strrchr(parent_path, '/');
+-	if (slash == NULL)
+-		goto done;
++static void append_interfaces(struct generic_data *data, DBusMessageIter *iter)
++{
++	DBusMessageIter array;
++	GSList *l;
+ 
+-	if (slash == parent_path && parent_path[1] != '\0')
+-		parent_path[1] = '\0';
+-	else
+-		*slash = '\0';
++	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
++				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++				DBUS_TYPE_STRING_AS_STRING
++				DBUS_TYPE_ARRAY_AS_STRING
++				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++				DBUS_TYPE_STRING_AS_STRING
++				DBUS_TYPE_VARIANT_AS_STRING
++				DBUS_DICT_ENTRY_END_CHAR_AS_STRING
++				DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &array);
+ 
+-	if (!strlen(parent_path))
+-		goto done;
++	for (l = data->interfaces; l != NULL; l = l->next) {
++		if (g_slist_find(data->added, l->data))
++			continue;
+ 
+-	if (dbus_connection_get_object_path_data(conn, parent_path,
+-							(void *) &data) == FALSE) {
+-		goto done;
++		append_interface(l->data, &array);
+ 	}
+ 
+-	invalidate_parent_data(conn, parent_path);
++	dbus_message_iter_close_container(iter, &array);
++}
+ 
+-	if (data == NULL)
+-		goto done;
++static void append_object(gpointer data, gpointer user_data)
++{
++	struct generic_data *child = data;
++	DBusMessageIter *array = user_data;
++	DBusMessageIter entry;
+ 
+-	g_free(data->introspect);
+-	data->introspect = NULL;
++	dbus_message_iter_open_container(array, DBUS_TYPE_DICT_ENTRY, NULL,
++								&entry);
++	dbus_message_iter_append_basic(&entry, DBUS_TYPE_OBJECT_PATH,
++								&child->path);
++	append_interfaces(child, &entry);
++	dbus_message_iter_close_container(array, &entry);
+ 
+-done:
+-	g_free(parent_path);
++	g_slist_foreach(child->objects, append_object, user_data);
+ }
+ 
+-static const GDBusMethodTable introspect_methods[] = {
+-	{ GDBUS_METHOD("Introspect", NULL,
+-			GDBUS_ARGS({ "xml", "s" }), introspect) },
++static DBusMessage *get_objects(DBusConnection *connection,
++				DBusMessage *message, void *user_data)
++{
++	struct generic_data *data = user_data;
++	DBusMessage *reply;
++	DBusMessageIter iter;
++	DBusMessageIter array;
++
++	reply = dbus_message_new_method_return(message);
++	if (reply == NULL)
++		return NULL;
++
++	dbus_message_iter_init_append(reply, &iter);
++
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++					DBUS_TYPE_OBJECT_PATH_AS_STRING
++					DBUS_TYPE_ARRAY_AS_STRING
++					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++					DBUS_TYPE_STRING_AS_STRING
++					DBUS_TYPE_ARRAY_AS_STRING
++					DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++					DBUS_TYPE_STRING_AS_STRING
++					DBUS_TYPE_VARIANT_AS_STRING
++					DBUS_DICT_ENTRY_END_CHAR_AS_STRING
++					DBUS_DICT_ENTRY_END_CHAR_AS_STRING
++					DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
++					&array);
++
++	g_slist_foreach(data->objects, append_object, &array);
++
++	dbus_message_iter_close_container(&iter, &array);
++
++	return reply;
++}
++
++static const GDBusMethodTable manager_methods[] = {
++	{ GDBUS_METHOD("GetManagedObjects", NULL,
++		GDBUS_ARGS({ "objects", "a{oa{sa{sv}}}" }), get_objects) },
+ 	{ }
+ };
+ 
+-static void add_interface(struct generic_data *data, const char *name,
++static const GDBusSignalTable manager_signals[] = {
++	{ GDBUS_SIGNAL("InterfacesAdded",
++		GDBUS_ARGS({ "object", "o" },
++				{ "interfaces", "a{sa{sv}}" })) },
++	{ GDBUS_SIGNAL("InterfacesRemoved",
++		GDBUS_ARGS({ "object", "o" }, { "interfaces", "as" })) },
++	{ }
++};
++
++static gboolean add_interface(struct generic_data *data,
++				const char *name,
+ 				const GDBusMethodTable *methods,
+ 				const GDBusSignalTable *signals,
+ 				const GDBusPropertyTable *properties,
+@@ -921,7 +1186,32 @@ static void add_interface(struct generic_data *data, const char *name,
+ 				GDBusDestroyFunction destroy)
+ {
+ 	struct interface_data *iface;
++	const GDBusMethodTable *method;
++	const GDBusSignalTable *signal;
++	const GDBusPropertyTable *property;
++
++	for (method = methods; method && method->name; method++) {
++		if (!check_experimental(method->flags,
++					G_DBUS_METHOD_FLAG_EXPERIMENTAL))
++			goto done;
++	}
++
++	for (signal = signals; signal && signal->name; signal++) {
++		if (!check_experimental(signal->flags,
++					G_DBUS_SIGNAL_FLAG_EXPERIMENTAL))
++			goto done;
++	}
++
++	for (property = properties; property && property->name; property++) {
++		if (!check_experimental(property->flags,
++					G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++			goto done;
++	}
++
++	/* Nothing to register */
++	return FALSE;
+ 
++done:
+ 	iface = g_new0(struct interface_data, 1);
+ 	iface->name = g_strdup(name);
+ 	iface->methods = methods;
+@@ -931,6 +1221,14 @@ static void add_interface(struct generic_data *data, const char *name,
+ 	iface->destroy = destroy;
+ 
+ 	data->interfaces = g_slist_append(data->interfaces, iface);
++	if (data->parent == NULL)
++		return TRUE;
++
++	data->added = g_slist_append(data->added, iface);
++
++	add_pending(data);
++
++	return TRUE;
+ }
+ 
+ static struct generic_data *object_path_ref(DBusConnection *connection,
+@@ -947,42 +1245,27 @@ static struct generic_data *object_path_ref(DBusConnection *connection,
+ 	}
+ 
+ 	data = g_new0(struct generic_data, 1);
++	data->conn = dbus_connection_ref(connection);
++	data->path = g_strdup(path);
+ 	data->refcount = 1;
+ 
+ 	data->introspect = g_strdup(DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE "<node></node>");
+ 
+ 	if (!dbus_connection_register_object_path(connection, path,
+ 						&generic_table, data)) {
++		dbus_connection_unref(data->conn);
++		g_free(data->path);
+ 		g_free(data->introspect);
+ 		g_free(data);
+ 		return NULL;
+-	}
+-
+-	invalidate_parent_data(connection, path);
+-
+-	add_interface(data, DBUS_INTERFACE_INTROSPECTABLE,
+-			introspect_methods, NULL, NULL, data, NULL);
+-
+-	return data;
+-}
+-
+-static gboolean remove_interface(struct generic_data *data, const char *name)
+-{
+-	struct interface_data *iface;
+-
+-	iface = find_interface(data->interfaces, name);
+-	if (iface == NULL)
+-		return FALSE;
+-
+-	data->interfaces = g_slist_remove(data->interfaces, iface);
++	}
+ 
+-	if (iface->destroy)
+-		iface->destroy(iface->user_data);
++	invalidate_parent_data(connection, path);
+ 
+-	g_free(iface->name);
+-	g_free(iface);
++	add_interface(data, DBUS_INTERFACE_INTROSPECTABLE, introspect_methods,
++						NULL, NULL, data, NULL);
+ 
+-	return TRUE;
++	return data;
+ }
+ 
+ static void object_path_unref(DBusConnection *connection, const char *path)
+@@ -1002,10 +1285,11 @@ static void object_path_unref(DBusConnection *connection, const char *path)
+ 		return;
+ 
+ 	remove_interface(data, DBUS_INTERFACE_INTROSPECTABLE);
++	remove_interface(data, DBUS_INTERFACE_PROPERTIES);
+ 
+-	invalidate_parent_data(connection, path);
++	invalidate_parent_data(data->conn, data->path);
+ 
+-	dbus_connection_unregister_object_path(connection, path);
++	dbus_connection_unregister_object_path(data->conn, data->path);
+ }
+ 
+ static gboolean check_signal(DBusConnection *conn, const char *path,
+@@ -1032,55 +1316,23 @@ static gboolean check_signal(DBusConnection *conn, const char *path,
+ 	}
+ 
+ 	for (signal = iface->signals; signal && signal->name; signal++) {
+-		if (!strcmp(signal->name, name)) {
+-			*args = signal->args;
+-			return TRUE;
++		if (strcmp(signal->name, name) != 0)
++			continue;
++
++		if (signal->flags & G_DBUS_SIGNAL_FLAG_EXPERIMENTAL) {
++			const char *env = g_getenv("GDBUS_EXPERIMENTAL");
++			if (g_strcmp0(env, "1") != 0)
++				break;
+ 		}
++
++		*args = signal->args;
++		return TRUE;
+ 	}
+ 
+ 	error("No signal named %s on interface %s", name, interface);
+ 	return FALSE;
+ }
+ 
+-static dbus_bool_t emit_signal_valist(DBusConnection *conn,
+-						const char *path,
+-						const char *interface,
+-						const char *name,
+-						int first,
+-						va_list var_args)
+-{
+-	DBusMessage *signal;
+-	dbus_bool_t ret;
+-	const GDBusArgInfo *args;
+-
+-	if (!check_signal(conn, path, interface, name, &args))
+-		return FALSE;
+-
+-	signal = dbus_message_new_signal(path, interface, name);
+-	if (signal == NULL) {
+-		error("Unable to allocate new %s.%s signal", interface,  name);
+-		return FALSE;
+-	}
+-
+-	ret = dbus_message_append_args_valist(signal, first, var_args);
+-	if (!ret)
+-		goto fail;
+-
+-	if (g_dbus_args_have_signature(args, signal) == FALSE) {
+-		error("%s.%s: expected signature'%s' but got '%s'",
+-				interface, name, args, signature);
+-		ret = FALSE;
+-		goto fail;
+-	}
+-
+-	ret = dbus_connection_send(conn, signal, NULL);
+-
+-fail:
+-	dbus_message_unref(signal);
+-
+-	return ret;
+-}
+-
+ gboolean g_dbus_register_interface(DBusConnection *connection,
+ 					const char *path, const char *name,
+ 					const GDBusMethodTable *methods,
+@@ -1100,8 +1352,17 @@ gboolean g_dbus_register_interface(DBusConnection *connection,
+ 		return FALSE;
+ 	}
+ 
+-	add_interface(data, name, methods, signals,
+-			properties, user_data, destroy);
++	if (!add_interface(data, name, methods, signals, properties, user_data,
++								destroy)) {
++		object_path_unref(connection, path);
++		return FALSE;
++	}
++
++	if (properties != NULL && !find_interface(data->interfaces,
++						DBUS_INTERFACE_PROPERTIES))
++		add_interface(data, DBUS_INTERFACE_PROPERTIES,
++				properties_methods, properties_signals, NULL,
++				data, NULL);
+ 
+ 	g_free(data->introspect);
+ 	data->introspect = NULL;
+@@ -1130,7 +1391,7 @@ gboolean g_dbus_unregister_interface(DBusConnection *connection,
+ 	g_free(data->introspect);
+ 	data->introspect = NULL;
+ 
+-	object_path_unref(connection, path);
++	object_path_unref(connection, data->path);
+ 
+ 	return TRUE;
+ }
+@@ -1208,20 +1469,100 @@ DBusMessage *g_dbus_create_reply(DBusMessage *message, int type, ...)
+ 	return reply;
+ }
+ 
++static void g_dbus_flush(DBusConnection *connection)
++{
++	GSList *l;
++
++	for (l = pending; l;) {
++		struct generic_data *data = l->data;
++
++		l = l->next;
++		if (data->conn != connection)
++			continue;
++
++		process_changes(data);
++	}
++}
++
+ gboolean g_dbus_send_message(DBusConnection *connection, DBusMessage *message)
+ {
+-	dbus_bool_t result;
++	dbus_bool_t result = FALSE;
+ 
+ 	if (dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_CALL)
+ 		dbus_message_set_no_reply(message, TRUE);
++	else if (dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_SIGNAL) {
++		const char *path = dbus_message_get_path(message);
++		const char *interface = dbus_message_get_interface(message);
++		const char *name = dbus_message_get_member(message);
++		const GDBusArgInfo *args;
++
++		if (!check_signal(connection, path, interface, name, &args))
++			goto out;
++	}
++
++	/* Flush pending signal to guarantee message order */
++	g_dbus_flush(connection);
+ 
+ 	result = dbus_connection_send(connection, message, NULL);
+ 
++out:
+ 	dbus_message_unref(message);
+ 
+ 	return result;
+ }
+ 
++gboolean g_dbus_send_message_with_reply(DBusConnection *connection,
++					DBusMessage *message,
++					DBusPendingCall **call, int timeout)
++{
++	dbus_bool_t ret;
++
++	/* Flush pending signal to guarantee message order */
++	g_dbus_flush(connection);
++
++	ret = dbus_connection_send_with_reply(connection, message, call,
++								timeout);
++
++	if (ret == TRUE && call != NULL && *call == NULL) {
++		error("Unable to send message (passing fd blocked?)");
++		return FALSE;
++	}
++
++	return ret;
++}
++
++gboolean g_dbus_send_error_valist(DBusConnection *connection,
++					DBusMessage *message, const char *name,
++					const char *format, va_list args)
++{
++	DBusMessage *error;
++	char str[1024];
++
++	vsnprintf(str, sizeof(str), format, args);
++
++	error = dbus_message_new_error(message, name, str);
++	if (error == NULL)
++		return FALSE;
++
++	return g_dbus_send_message(connection, error);
++}
++
++gboolean g_dbus_send_error(DBusConnection *connection, DBusMessage *message,
++				const char *name, const char *format, ...)
++{
++	va_list args;
++	gboolean result;
++
++	va_start(args, format);
++
++	result = g_dbus_send_error_valist(connection, message, name,
++							format, args);
++
++	va_end(args);
++
++	return result;
++}
++
+ gboolean g_dbus_send_reply_valist(DBusConnection *connection,
+ 				DBusMessage *message, int type, va_list args)
+ {
+@@ -1263,7 +1604,7 @@ gboolean g_dbus_emit_signal(DBusConnection *connection,
+ 
+ 	va_start(args, type);
+ 
+-	result = emit_signal_valist(connection, path, interface,
++	result = g_dbus_emit_signal_valist(connection, path, interface,
+ 							name, type, args);
+ 
+ 	va_end(args);
+@@ -1275,8 +1616,157 @@ gboolean g_dbus_emit_signal_valist(DBusConnection *connection,
+ 				const char *path, const char *interface,
+ 				const char *name, int type, va_list args)
+ {
+-	return emit_signal_valist(connection, path, interface,
+-							name, type, args);
++	DBusMessage *signal;
++	dbus_bool_t ret;
++	const GDBusArgInfo *args_info;
++
++	if (!check_signal(connection, path, interface, name, &args_info))
++		return FALSE;
++
++	signal = dbus_message_new_signal(path, interface, name);
++	if (signal == NULL) {
++		error("Unable to allocate new %s.%s signal", interface,  name);
++		return FALSE;
++	}
++
++	ret = dbus_message_append_args_valist(signal, type, args);
++	if (!ret)
++		goto fail;
++
++	if (g_dbus_args_have_signature(args_info, signal) == FALSE) {
++		error("%s.%s: got unexpected signature '%s'", interface, name,
++					dbus_message_get_signature(signal));
++		ret = FALSE;
++		goto fail;
++	}
++
++	return g_dbus_send_message(connection, signal);
++
++fail:
++	dbus_message_unref(signal);
++
++	return ret;
++}
++
++static void process_properties_from_interface(struct generic_data *data,
++						struct interface_data *iface)
++{
++	GSList *l;
++	DBusMessage *signal;
++	DBusMessageIter iter, dict, array;
++	GSList *invalidated;
++
++	data->pending_prop = FALSE;
++
++	if (iface->pending_prop == NULL)
++		return;
++
++	signal = dbus_message_new_signal(data->path,
++			DBUS_INTERFACE_PROPERTIES, "PropertiesChanged");
++	if (signal == NULL) {
++		error("Unable to allocate new " DBUS_INTERFACE_PROPERTIES
++						".PropertiesChanged signal");
++		return;
++	}
++
++	iface->pending_prop = g_slist_reverse(iface->pending_prop);
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING,	&iface->name);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++			DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++			DBUS_TYPE_STRING_AS_STRING DBUS_TYPE_VARIANT_AS_STRING
++			DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
++
++	invalidated = NULL;
++
++	for (l = iface->pending_prop; l != NULL; l = l->next) {
++		GDBusPropertyTable *p = l->data;
++
++		if (p->get == NULL)
++			continue;
++
++		if (p->exists != NULL && !p->exists(p, iface->user_data)) {
++			invalidated = g_slist_prepend(invalidated, p);
++			continue;
++		}
++
++		append_property(iface, p, &dict);
++	}
++
++	dbus_message_iter_close_container(&iter, &dict);
++
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++				DBUS_TYPE_STRING_AS_STRING, &array);
++	for (l = invalidated; l != NULL; l = g_slist_next(l)) {
++		GDBusPropertyTable *p = l->data;
++
++		dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING,
++								&p->name);
++	}
++	g_slist_free(invalidated);
++	dbus_message_iter_close_container(&iter, &array);
++
++	g_slist_free(iface->pending_prop);
++	iface->pending_prop = NULL;
++
++	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
++	dbus_connection_send(data->conn, signal, NULL);
++	dbus_message_unref(signal);
++}
++
++static void process_property_changes(struct generic_data *data)
++{
++	GSList *l;
++
++	for (l = data->interfaces; l != NULL; l = l->next) {
++		struct interface_data *iface = l->data;
++
++		process_properties_from_interface(data, iface);
++	}
++}
++
++void g_dbus_emit_property_changed(DBusConnection *connection,
++				const char *path, const char *interface,
++				const char *name)
++{
++	const GDBusPropertyTable *property;
++	struct generic_data *data;
++	struct interface_data *iface;
++
++	if (path == NULL)
++		return;
++
++	if (!dbus_connection_get_object_path_data(connection, path,
++					(void **) &data) || data == NULL)
++		return;
++
++	iface = find_interface(data->interfaces, interface);
++	if (iface == NULL)
++		return;
++
++	/*
++	 * If ObjectManager is attached, don't emit property changed if
++	 * interface is not yet published
++	 */
++	if (root && g_slist_find(data->added, iface))
++		return;
++
++	property = find_property(iface->properties, name);
++	if (property == NULL) {
++		error("Could not find property %s in %p", name,
++							iface->properties);
++		return;
++	}
++
++	if (g_slist_find(iface->pending_prop, (void *) property) != NULL)
++		return;
++
++	data->pending_prop = TRUE;
++	iface->pending_prop = g_slist_prepend(iface->pending_prop,
++						(void *) property);
++
++	add_pending(data);
+ }
+ 
+ gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
+@@ -1300,3 +1790,35 @@ gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
+ 
+ 	return TRUE;
+ }
++
++gboolean g_dbus_attach_object_manager(DBusConnection *connection)
++{
++	struct generic_data *data;
++
++	data = object_path_ref(connection, "/");
++	if (data == NULL)
++		return FALSE;
++
++	add_interface(data, DBUS_INTERFACE_OBJECT_MANAGER,
++					manager_methods, manager_signals,
++					NULL, data, NULL);
++	root = data;
++
++	return TRUE;
++}
++
++gboolean g_dbus_detach_object_manager(DBusConnection *connection)
++{
++	if (!g_dbus_unregister_interface(connection, "/",
++					DBUS_INTERFACE_OBJECT_MANAGER))
++		return FALSE;
++
++	root = NULL;
++
++	return TRUE;
++}
++
++void g_dbus_set_flags(int flags)
++{
++	global_flags = flags;
++}

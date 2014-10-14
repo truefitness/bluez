@@ -120,4 +120,3 @@ index b7b993e..1ecbc9b 100644
  		return;
  
  	if (new_state == AVDTP_SESSION_STATE_CONNECTED) {
--- 

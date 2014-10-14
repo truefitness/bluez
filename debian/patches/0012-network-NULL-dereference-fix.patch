@@ -28,4 +28,3 @@ index 4704072..a223685 100644
  	sk = socket(AF_INET, SOCK_STREAM, 0);
  	if (sk < 0)
  		return -1;
--- 

@@ -62,4 +62,3 @@ index e3a5b2e..f73f035 100644
  			goto exit;
  		}
  		err = hid_switch_logitech(device);
--- 

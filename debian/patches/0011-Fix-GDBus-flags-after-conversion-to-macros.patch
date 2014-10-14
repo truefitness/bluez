@@ -78,4 +78,3 @@ index 385354d..7061f64 100644
  			NULL, GDBUS_ARGS({ "adapters", "ao" }),
  			list_adapters) },
  	{ }
--- 

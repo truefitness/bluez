@@ -1,0 +1,21 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Tue, 3 Jun 2014 09:57:29 -0500
+Subject: avctp_browsing_send should use browsing channel
+
+---
+ audio/avctp.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index 2fb1173..7b97340 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -1126,7 +1126,7 @@ static int avctp_browsing_send(struct avctp *session, uint8_t transaction,
+ 	if (!session->browsing)
+ 		return -ENOTCONN;
+ 
+-	sk = g_io_channel_unix_get_fd(session->io);
++	sk = g_io_channel_unix_get_fd(session->browsing);
+ 	size = AVCTP_HEADER_LENGTH + operand_count;
+ 	buf = g_malloc0(size);
+ 

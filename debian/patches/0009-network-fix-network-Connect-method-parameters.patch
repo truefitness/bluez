@@ -21,4 +21,3 @@ index 544ec3a..59423a9 100644
  	{ GDBUS_METHOD("Disconnect",
  			NULL, NULL, connection_disconnect) },
  	{ GDBUS_METHOD("GetProperties",
--- 

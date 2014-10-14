@@ -1,0 +1,216 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Tue, 3 Jun 2014 15:22:11 -0500
+Subject: Browsing channel gets connected regardless if host or device
+ initiates the connection
+
+---
+ audio/avctp.c |    1 -
+ audio/avrcp.c |   75 ++++++++++++++++++++++++++++++---------------------------
+ 2 files changed, 40 insertions(+), 36 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index 7b97340..ce07946 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -1338,7 +1338,6 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
+ 
+ 	avctp_set_state(session, AVCTP_STATE_CONNECTING);
+ 
+-	DBG("creating io");
+ 	io = bt_io_connect(BT_IO_L2CAP, avctp_connect_cb, session, NULL, &err,
+ 				BT_IO_OPT_SOURCE_BDADDR, &session->server->src,
+ 				BT_IO_OPT_DEST_BDADDR, &session->dst,
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 2bc31f3..2bf5275 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -153,6 +153,7 @@ struct avrcp_server {
+ 	GSList *players;
+ 	struct avrcp_player *active_player;
+ 	struct avctp *session;
++	unsigned int browsing_timer;
+ };
+ 
+ struct pending_pdu {
+@@ -194,8 +195,7 @@ static uint32_t company_ids[] = {
+ static void register_volume_notification(struct avrcp_player *player);
+ static void avrcp_register_notification(struct control *con, uint8_t event);
+ static void avrcp_get_element_attributes(struct control *con);
+-static void avrcp_connect_browsing(struct avctp *player);
+-
++static void avrcp_connect_browsing(struct avrcp_server *server);
+ 
+ static sdp_record_t *avrcp_ct_record(void)
+ {
+@@ -1233,6 +1233,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ {
+ 	struct avrcp_server *server;
+ 	struct avrcp_player *player;
++	struct avctp *session;
+ 	const sdp_record_t *rec;
+ 	sdp_list_t *list;
+ 	sdp_profile_desc_t *desc;
+@@ -1252,14 +1253,14 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 	switch (new_state) {
+ 	case AVCTP_STATE_DISCONNECTED:
+ 	
+-		player->session = NULL;
++		/*player->session = NULL;
+ 		player->dev = NULL;
+ 		player->registered_events = 0;
+ 
+ 		if (player->handler) {
+ 			avctp_unregister_pdu_handler(player->handler);
+ 			player->handler = 0;
+-		}
++		}*/
+ 
+ 		break;
+ 	case AVCTP_STATE_CONNECTING:
+@@ -1278,6 +1279,19 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		break;
+ 	case AVCTP_STATE_CONNECTED:
+ 		DBG("AVRCP Connected");
++			
++		/* 
++		 * This callback gets called when the avctp layer gets 
++		 * connected regardless if the host or device initiated the 
++		 * connection. This check is to make sure the avrcp server 
++		 * object's session member is initialized 
++		 */	
++		if(!server->session){
++			session = avctp_connect(&dev->src, &dev->dst);			
++			if(session) {
++				server->session = session;
++			}	
++		}
+ 		
+ 		rec = btd_device_get_record(dev->btd_dev, AVRCP_TARGET_UUID);
+ 		if (rec == NULL)
+@@ -1289,7 +1303,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		desc = list->data;
+ 
+ 		if (desc && desc->version >= 0x0104){
+-			DBG("Version is 1.4");
++			;
+ 			//register_volume_notification(player);
+ 		}
+ 				
+@@ -1299,12 +1313,17 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		if(desc && (features & AVRCP_FEATURE_BROWSING)){
+ 			/* TODO call avrcp_connect_browser here */
+ 			/* this expects avrcp struct as parameter */
+-			avrcp_connect_browsing(server->session);
++			avrcp_connect_browsing(server);
+ 		}
+ 		sdp_list_free(list, free);
+ 		return;
+ 		
+ 	case AVCTP_STATE_BROWSING_CONNECTED:
++		if (server->browsing_timer > 0) {
++			g_source_remove(server->browsing_timer);
++			server->browsing_timer = 0;
++			//avctp_connect_browsing(session->conn);
++		}
+ 		return;
+ 	default:
+ 		return;
+@@ -1323,18 +1342,12 @@ gboolean avrcp_connect(struct audio_device *dev)
+ 		return FALSE;
+ 	}
+ 			
+-	DBG("Connecting to avrcp...");
+ 	session = avctp_connect(&dev->src, &dev->dst);
+ 	if (!session){
+ 		DBG("Connecting to avrcp failed");
+ 		return FALSE;
+ 	}
+ 	
+-	if(session) {
+-		DBG("Session assigned");
+-		server->session = session;
+-	}
+-	
+ 	return TRUE;
+ }
+ 
+@@ -1409,8 +1422,8 @@ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
+ 
+ 	bacpy(&server->src, src);
+ 	
++	/* Add a listener for avctp state changes */
+ 	if (!avctp_id) {
+-		DBG("Adding state_changed callback");
+ 		avctp_id = avctp_add_state_cb(state_changed, NULL);
+ 	}
+ 
+@@ -1567,15 +1580,7 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
+ 	if (pdu == NULL || pdu->params[0] != CAP_EVENTS_SUPPORTED)
+ 		return FALSE;
+ 	DBG("get capabilities response");
+-	/* TODO: Insert call to avctp_connect browsing here */
+-	/* Connect browsing if pending */
+-	/*
+-	if (session->browsing_timer > 0) {
+-		g_source_remove(session->browsing_timer);
+-		session->browsing_timer = 0;
+-		avctp_connect_browsing(session->conn);
+-	}
+-	*/
++
+ 	count = pdu->params[1];
+ 
+ 	for (; count > 0; count--) {
+@@ -1634,39 +1639,39 @@ void avrcp_get_capabilities(struct control *con)
+ 					avrcp_get_capabilities_resp,
+ 					con);
+ }
+-#if 0
++
+ static gboolean connect_browsing(gpointer user_data)
+ {
+-	struct avrcp *session = user_data;
++	struct avrcp_server *server = user_data;
+ 
+-	session->browsing_timer = 0;
++	server->browsing_timer = 0;
+ 
+-	avctp_connect_browsing(session->conn);
++	avctp_connect_browsing(server->session);
+ 
+ 	return FALSE;
+ }
+-#endif
+ 
+-static void avrcp_connect_browsing(struct avctp *session)
++
++static void avrcp_connect_browsing(struct avrcp_server *server)
+ {
+ 	/* Immediately connect browsing channel if initiator otherwise delay
+ 	 * it to avoid possible collisions
+ 	 */
+-	if (avctp_is_initiator(session)) {
+-		avctp_connect_browsing(session);
++	if (avctp_is_initiator(server->session)) {
++		avctp_connect_browsing(server->session);
+ 		return;
+ 	}
+ 
+ 	/* this gets done when this is not the initiator */
+ 	/* comment out for now */
+-#if 0
+-	if (session->browsing_timer > 0)
++	if (server->browsing_timer > 0)
+ 		return;
+ 
+-	session->browsing_timer = g_timeout_add_seconds(AVRCP_BROWSING_TIMEOUT,
++	DBG("Delaying connect_browsing call for %d sec",AVRCP_BROWSING_TIMEOUT);
++	server->browsing_timer = g_timeout_add_seconds(AVRCP_BROWSING_TIMEOUT,
+ 							connect_browsing,
+-							session);
+-#endif
++							server);
++
+ }
+ 
+ static const char *metadata_to_str(uint32_t id)

@@ -1,7 +1,6 @@
 From: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
 Date: Thu, 29 May 2014 13:35:56 -0500
-Subject: Fix FTBFS is parsing inline assembly for calculating MMX
- scalefactors
+Subject: Fix FTBFS is parsing inline assembly for calculating MMX scalefactors
 
 Without this patch, bluez fails to compile when building using GCC 4.7; for
 test-rebuild-20111222.
@@ -23,4 +22,3 @@ index 27e9a56..a4d2f20 100644
  					(char *) &sb_sample_f[0][0][0]),
  				"r" (&scale_factor[ch][sb]),
  				"r" (&consts),
--- 

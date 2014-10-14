@@ -1,0 +1,113 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Mon, 25 Aug 2014 14:09:48 -0500
+Subject: make sure pointers are not null before proceeding
+
+---
+ audio/avrcp.c |   27 +++++++++++++++++++--------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 7d12634..1ed2c2b 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -1214,7 +1214,6 @@ size_t avrcp_handle_vendor_reject(uint8_t *code, uint8_t *operands)
+ 
+ static struct avrcp_server *find_server(GSList *list, const bdaddr_t *src)
+ {
+-	DBG("Finding server for: %s", batostr(src));
+ 	for (; list; list = list->next) {
+ 		struct avrcp_server *server = list->data;
+ 
+@@ -1296,7 +1295,8 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 	case AVCTP_STATE_DISCONNECTED:
+ 	//media_player_destroy(server->ct_player->user_data);
+ 	server->ct_player->dev = dev;
+-	avrcp_unregister_player(server->ct_player);
++	while(server->ct_player)
++		avrcp_unregister_player(server->ct_player);
+ 	server->session = NULL;
+ 	
+ 		/*player->session = NULL;
+@@ -1564,7 +1564,7 @@ struct avrcp_player *avrcp_register_player(const bdaddr_t *src,
+ 
+ 	if (!avctp_id)
+ 		avctp_id = avctp_add_state_cb(state_changed, NULL);
+-
++	DBG("Adding player to players");
+ 	server->players = g_slist_append(server->players, player);
+ 
+ 	return player;
+@@ -2651,18 +2651,18 @@ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+ 		DBG("Set ct_player: %p", player);
+ 		server->ct_player = player;
+ 	}
+-
++	DBG("Adding player to players");
+ 	server->players = g_slist_prepend(
+ 						server->players,
+ 						player);
+ 
+-	return server->ct_player;
++	return player;
+ }
+ 
+ static struct avrcp_player *find_ct_player(struct avrcp_server *server, uint16_t id)
+ {
+ 	GSList *l;
+-
++	DBG("Finding player with id %d", id);
+ 	for (l = server->players; l; l = l->next) {
+ 		struct avrcp_player *player = l->data;
+ 
+@@ -2674,7 +2674,7 @@ static struct avrcp_player *find_ct_player(struct avrcp_server *server, uint16_t
+ 		if (player->id == id)
+ 			return player;
+ 	}
+-
++	DBG("Player with id %d not found", id);
+ 	return NULL;
+ }
+ 
+@@ -2874,7 +2874,11 @@ static void avrcp_status_changed(struct avctp *session,
+ 	const char *curval, *strval;
+ 	
+ 	server = find_server(servers, avctp_get_src(session));
++	if(!server)
++		return;
+ 	player = server->ct_player;
++	if(!player)
++		return;
+ 	mp = player->user_data;
+ 
+ 	value = pdu->params[1];
+@@ -2898,8 +2902,12 @@ static void avrcp_track_changed(struct avctp *session,
+ 	if(!server)
+ 		return;
+ 	
++	struct avrcp_player *player = server->ct_player;
++	if(!player)
++		return;
++	
+ 	if (avctp_get_browsing_id(session)) {
+-		struct avrcp_player *player = server->ct_player;
++		
+ 		player->uid = bt_get_be64(&pdu->params[1]);
+ 		avrcp_get_item_attributes(session, player->uid);
+ 	} else
+@@ -2917,6 +2925,8 @@ static void avrcp_addressed_player_changed(struct avctp *session,
+ 	
+ 	if(!server)
+ 		return;
++		
++	
+ 	
+ 	player = server->ct_player;
+ 
+@@ -2932,6 +2942,7 @@ static void avrcp_addressed_player_changed(struct avctp *session,
+ 
+ 	player->uid_counter = bt_get_be16(&pdu->params[3]);
+ 	server->ct_player = player;
++	DBG("Addressed player changed %p", server->ct_player);
+ 
+ 	if (player->features != NULL)
+ 		return;

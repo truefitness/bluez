@@ -44,4 +44,3 @@ index 5c751af..a48c8b8 100644
  	sk = g_io_channel_unix_get_fd(chan);
  	fcntl(sk, F_SETFL, 0);
  
--- 

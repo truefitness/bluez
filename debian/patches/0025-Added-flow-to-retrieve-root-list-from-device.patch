@@ -1,0 +1,367 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Thu, 5 Jun 2014 13:47:16 -0500
+Subject: Added flow to retrieve root list from device
+
+---
+ audio/avrcp.c   |  272 +++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ lib/bluetooth.h |    6 ++
+ 2 files changed, 271 insertions(+), 7 deletions(-)
+
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index c4dc770..8ca919d 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -29,6 +29,7 @@
+ 
+ #include <stdlib.h>
+ #include <stdint.h>
++#include <stdbool.h>
+ #include <errno.h>
+ #include <unistd.h>
+ #include <assert.h>
+@@ -174,6 +175,7 @@ struct avrcp_server {
+ 	uint32_t ct_record_id;
+ 	GSList *players;
+ 	struct avrcp_player *active_player;
++	struct avrcp_player *ct_player;
+ 	struct avctp *session;
+ 	unsigned int browsing_timer;
+ };
+@@ -199,6 +201,11 @@ struct avrcp_player {
+ 	GDestroyNotify destroy;
+ };
+ 
++struct avrcp_media_player {
++	uint16_t id;
++	bool browsable;
++}avrcp_media_player;
++
+ struct avrcp_state_callback {
+ 	avrcp_state_cb cb;
+ 	void *user_data;
+@@ -1444,6 +1451,11 @@ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
+ 
+ 	bacpy(&server->src, src);
+ 	
++	if(server->ct_record_id){
++		DBG("TODO Create controller player");
++		
++	}
++	
+ 	/* Add a listener for avctp state changes */
+ 	if (!avctp_id) {
+ 		avctp_id = avctp_add_state_cb(state_changed, NULL);
+@@ -1912,7 +1924,244 @@ static const char *subtype_to_string(uint32_t subtype)
+ 	return "None";
+ }
+ 
+-static void avrcp_parse_media_player_item(void * reserved, 
++static void avrcp_player_parse_features(struct avrcp_media_player *player, uint8_t * features)
++{
++	if (features[7] & 0x08) {
++		DBG("Media player browsable is supported");
++		player->browsable = true;
++	}
++
++	if (features[7] & 0x10) {
++		DBG("Media player searchable is supported");
++	}
++
++	if (features[8] & 0x02) {
++		DBG("Media player now playing folder is supported");
++	}
++}
++
++static void *parse_media_folder(struct avctp *session,
++					uint8_t *operands, uint16_t len)
++{
++	//struct avrcp_player *player = session->controller->player;
++	//struct media_player *mp = player->user_data;
++	//struct media_item *item;
++	void * item;
++	uint16_t namelen;
++	char name[255];
++	uint64_t uid;
++	uint8_t type;
++	uint8_t playable;
++
++	if (len < 12)
++		return NULL;
++
++	uid = bt_get_be64(&operands[0]);
++	type = operands[8];
++	playable = operands[9];
++
++	namelen = MIN(bt_get_be16(&operands[12]), sizeof(name) - 1);
++	if (namelen > 0) {
++		memcpy(name, &operands[14], namelen);
++		name[namelen] = '\0';
++		DBG("Folder item (%08llu): %s",uid, name);
++	}
++	item = NULL;
++	//item = media_player_create_folder(mp, name, type, uid);
++	if (!item)
++		return NULL;
++
++	//media_item_set_playable(item, playable & 0x01);
++
++	return item;
++}
++
++static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
++					size_t operand_count, void *user_data)
++{
++	struct avrcp_browsing_header *pdu = (void *) operands;
++	struct avctp *session = user_data;
++	//struct avrcp_player *player = session->controller->player;
++	//struct pending_list_items *p = player->p;
++	uint16_t count;
++	uint32_t items, total;
++	size_t i;
++	int err = 0;
++
++	if (pdu == NULL) {
++		err = -ETIMEDOUT;
++		goto done;
++	}
++
++	/* AVRCP 1.5 - Page 76:
++	 * If the TG receives a GetFolderItems command for an empty folder then
++	 * the TG shall return the error (= Range Out of Bounds) in the status
++	 * field of the GetFolderItems response.
++	 */
++	if (pdu->params[0] == AVRCP_STATUS_OUT_OF_BOUNDS)
++		goto done;
++
++	if (pdu->params[0] != AVRCP_STATUS_SUCCESS || operand_count < 5) {
++		err = -EINVAL;
++		goto done;
++	}
++
++	count = bt_get_be16(&operands[6]);
++	if (count == 0)
++		goto done;
++
++	for (i = 8; count && i + 3 < operand_count; count--) {
++		struct media_item *item;
++		uint8_t type;
++		uint16_t len;
++
++		type = operands[i++];
++		len = bt_get_be16(&operands[i]);
++		i += 2;
++
++		if (type != 0x03 && type != 0x02) {
++			i += len;
++			continue;
++		}
++
++		if (i + len > operand_count) {
++			error("Invalid item length");
++			break;
++		}
++
++		if (type == 0x03)
++			DBG("Media element found");
++			//item = parse_media_element(session, &operands[i], len);
++		else
++			item = parse_media_folder(session, &operands[i], len);
++
++		//if (item) {
++		//	if (g_slist_find(p->items, item))
++		//		goto done;
++		//	p->items = g_slist_append(p->items, item);
++		//}
++
++		i += len;
++	}
++
++	//items = g_slist_length(p->items);
++	//total = p->end - p->start;
++	//if (items < total) {
++	//	avrcp_list_items(session, p->start + items + 1, p->end);
++	//	return FALSE;
++	//}
++
++done:
++	//media_player_list_complete(player->user_data, p->items, err);
++
++	//g_slist_free(p->items);
++	//g_free(p);
++	//player->p = NULL;
++
++	return FALSE;
++}
++
++static void avrcp_list_items(struct avctp *session, uint32_t start,
++								uint32_t end)
++{
++	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 10 +
++			AVRCP_MEDIA_ATTRIBUTE_LAST * sizeof(uint32_t)];
++	//struct avrcp_player *player = session->controller->player;
++	struct avrcp_browsing_header *pdu = (void *) buf;
++	uint16_t length = AVRCP_BROWSING_HEADER_LENGTH + 10;
++	uint32_t attribute;
++
++	memset(buf, 0, sizeof(buf));
++
++	pdu->pdu_id = AVRCP_GET_FOLDER_ITEMS;
++	pdu->param_len = htons(10 + sizeof(uint32_t));
++
++	pdu->params[0] = 0x01;
++
++	bt_put_be32(start, &pdu->params[1]);
++	bt_put_be32(end, &pdu->params[5]);
++
++	pdu->params[9] = 1;
++
++	/* Only the title (0x01) is mandatory. This can be extended to
++	 * support AVRCP_MEDIA_ATTRIBUTE_* attributes */
++	attribute = htonl(AVRCP_MEDIA_ATTRIBUTE_TITLE);
++	memcpy(&pdu->params[10], &attribute, sizeof(uint32_t));
++
++	length += sizeof(uint32_t);
++
++	avctp_send_browsing_req(session, buf, length,
++					avrcp_list_items_rsp, session);
++}
++
++static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
++						uint8_t *operands,
++						size_t operand_count,
++						void *user_data)
++{
++	struct avctp *session = user_data;
++	struct avrcp_browsing_header *pdu = (void *) operands;
++	uint32_t items;
++	char **folders;
++	uint8_t depth, count;
++	size_t i;
++	char name[255];
++
++	if (pdu == NULL || pdu->params[0] != AVRCP_STATUS_SUCCESS ||
++							operand_count < 13)
++		return FALSE;
++
++	DBG("Set Browsed reply received");
++	items = bt_get_be32(&pdu->params[3]);
++	DBG("Media Player Number of items: %lu", (unsigned long)items);
++	depth = pdu->params[9];
++	DBG("Media Player depth: %d", depth);
++	
++	memset(name,0,255);
++	for (i = 10, count = 1; count - 1 < depth && i < operand_count;
++								count++) {
++		uint8_t len;
++
++		len = pdu->params[i++];
++
++		if (i + len > operand_count || len == 0) {
++			error("Invalid folder length");
++			break;
++		}
++
++		memcpy(name,&pdu->params[i],len);
++		DBG("Media Player Folder name: %s", name);
++		//folders[count] = g_memdup(&pdu->params[i], len);
++		i += len;
++	}
++	
++	if(items){
++		DBG("List items");
++		avrcp_list_items(conn, 0, items);
++	}
++	
++	return FALSE;
++}
++
++static void avrcp_set_browsed_player(struct avctp *session,
++						struct avrcp_media_player *player)
++{
++	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 2];
++	struct avrcp_browsing_header *pdu = (void *) buf;
++	uint16_t id;
++
++	memset(buf, 0, sizeof(buf));
++
++	pdu->pdu_id = AVRCP_SET_BROWSED_PLAYER;
++	id = htons(player->id);
++	memcpy(pdu->params, &id, 2);
++	pdu->param_len = htons(2);
++
++	avctp_send_browsing_req(session, buf, sizeof(buf),
++				avrcp_set_browsed_player_rsp, session);
++}
++
++static void avrcp_parse_media_player_item(struct avrcp_media_player *player, 
+ 						uint8_t *operands, uint16_t len)
+ {
+ 	uint16_t id, namelen;
+@@ -1928,11 +2177,19 @@ static void avrcp_parse_media_player_item(void * reserved,
+ 	
+ 	id = bt_get_be16(&operands[0]);
+ 	DBG("Media player ID: %d",id);
++	player->id = id;
+ 	
+ 	DBG("Media player type: %s", type_to_string(operands[2]));
+ 	
+ 	subtype = bt_get_be32(&operands[3]);
+-	DBG("Media player subtype: %s", subtype_to_string(subtype));
++	DBG("Media player subtype: (%d) %s", subtype, subtype_to_string(subtype));
++	
++	/*uint8_t * octet = &operands[8];
++	for(int i = 0; i < 8; i++){
++		DBG("Feature octet %d: 0x%2X",i+1,*octet++);
++	}*/
++	player->browsable = false;
++	avrcp_player_parse_features(player, &operands[8]);
+ 	
+ 	namelen = bt_get_be16(&operands[26]);
+ 	if(namelen > 0 && namelen + 28 == len) {
+@@ -1941,8 +2198,6 @@ static void avrcp_parse_media_player_item(void * reserved,
+ 		name[namelen] = '\0';
+ 		DBG("Media player name: %s", name);
+ 	}
+-	
+-	
+ }
+ 
+ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn, 
+@@ -1980,14 +2235,17 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
+ 		}
+ 		
+ 		DBG("Perform parsing here!");
+-		avrcp_parse_media_player_item(NULL, &operands[i], len);
++		avrcp_parse_media_player_item(&avrcp_media_player, &operands[i], len);
++		
++		if(avrcp_media_player.browsable == true){
++			DBG("Set browsed player here");
++			avrcp_set_browsed_player(conn, &avrcp_media_player);
++		}
+ 		
+ 		i+= len;
+ 		
+ 	}
+ 	
+-	DBG("Reply received!!!");
+-	
+ 	return TRUE;
+ }
+ 
+diff --git a/lib/bluetooth.h b/lib/bluetooth.h
+index 43a9237..eee633b 100644
+--- a/lib/bluetooth.h
++++ b/lib/bluetooth.h
+@@ -183,6 +183,12 @@ static inline uint16_t bt_get_be16(const void *ptr)
+ {
+ 	return bswap_16(bt_get_unaligned((const uint16_t *) ptr));
+ }
++
++static inline void bt_put_be32(uint32_t val, void *dst)
++{
++	bt_put_unaligned(bswap_32(val), (uint32_t *) dst);
++}
++
+ #elif __BYTE_ORDER == __BIG_ENDIAN
+ static inline uint64_t bt_get_le64(const void *ptr)
+ {

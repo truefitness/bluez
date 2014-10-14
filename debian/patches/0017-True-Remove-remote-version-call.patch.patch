@@ -46,4 +46,3 @@ index d74f2ea..4bc95a8 100644
  }
  
  static inline void disconn_complete(int index, void *ptr)
--- 

@@ -41,4 +41,3 @@ index eacfbcd..5a2c62e 100644
  Signals		Connected() {deprecated}
  
  			Sent when a successful AVRCP connection has been made
--- 

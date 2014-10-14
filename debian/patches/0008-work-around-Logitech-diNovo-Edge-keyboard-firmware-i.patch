@@ -22,4 +22,3 @@ index 0687c8a..2a571e5 100644
    RUN+="hid2hci --method=logitech-hid --devpath=%p"
  
  ENV{DEVTYPE}!="usb_device", GOTO="hid2hci_end"
--- 

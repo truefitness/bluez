@@ -1,0 +1,1159 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Wed, 27 Aug 2014 16:43:31 -0500
+Subject: fixed crashes and added browsing send pending queue from bluez 5
+
+---
+ audio/avctp.c   |  488 +++++++++++++++++++++++++++++++++++++++++++------------
+ audio/avctp.h   |    6 +
+ audio/avrcp.c   |  135 ++++++++-------
+ audio/avrcp.h   |    2 -
+ audio/control.c |    1 -
+ 5 files changed, 468 insertions(+), 164 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index 5ab53d8..23ff1c8 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -124,6 +124,26 @@ struct avctp_server {
+ 	GSList *sessions;
+ };
+ 
++struct avctp_browsing_req {
++	struct avctp_pending_req *p;
++	uint8_t *operands;
++	uint16_t operand_count;
++	avctp_browsing_rsp_cb func;
++	void *user_data;
++};
++
++typedef int (*avctp_process_cb) (void *data);
++
++struct avctp_pending_req {
++	struct avctp_channel *chan;
++	uint8_t transaction;
++	guint timeout;
++	int err;
++	avctp_process_cb process;
++	void *data;
++	GDestroyNotify destroy;
++};
++
+ struct avctp_rsp_handler {
+ 	uint8_t id;
+ 	avctp_rsp_cb func;
+@@ -136,26 +156,37 @@ struct avctp_browsing_rsp_handler {
+ 	void *user_data;
+ };
+ 
++struct avctp_channel {
++	struct avctp *session;
++	GIOChannel *io;
++	uint8_t transaction;
++	guint watch;
++	uint16_t mtu;
++	uint8_t *buffer;
++	GSList *handlers;
++	struct avctp_pending_req *p;
++	GQueue *queue;
++	GSList *processed;
++	guint process_id;
++	GDestroyNotify destroy;
++};
++
+ struct avctp {
+ 	struct avctp_server *server;
++	struct audio_device *dev;
+ 	bdaddr_t dst;
+ 
+ 	avctp_state_t state;
+ 
+ 	int uinput;
+-
+-	GIOChannel *io;
+-	GIOChannel *browsing;
++	
++	struct avctp_channel *control;
++	struct avctp_channel *browsing;
+ 	
+ 	guint io_id;
+ 	guint browsing_id;
+ 
+-	uint16_t mtu;
+-	uint16_t mtu_browsing;
+-
+ 	uint8_t key_quirks[256];
+-	GSList *handlers;
+-	GSList *browsing_handlers;
+ 	
+ 	bool initiator;
+ };
+@@ -167,6 +198,13 @@ struct avctp_pdu_handler {
+ 	unsigned int id;
+ };
+ 
++struct avctp_browsing_pdu_handler {
++	avctp_browsing_pdu_cb cb;
++	void *user_data;
++	unsigned int id;
++	GDestroyNotify destroy;
++};
++
+ static struct {
+ 	const char *name;
+ 	uint8_t avc;
+@@ -188,6 +226,7 @@ static GSList *handlers = NULL;
+ static uint8_t id = 0;
+ 
+ static void auth_cb(DBusError *derr, void *user_data);
++static gboolean process_queue(void *user_data);
+ 
+ static int send_event(int fd, uint16_t type, uint16_t code, int32_t value)
+ {
+@@ -334,6 +373,45 @@ static struct avctp_pdu_handler *find_handler(GSList *list, uint8_t opcode)
+ 	return NULL;
+ }
+ 
++static void pending_destroy(gpointer data, gpointer user_data)
++{
++	struct avctp_pending_req *req = data;
++
++	if (req->destroy)
++		req->destroy(req->data);
++
++	if (req->timeout > 0)
++		g_source_remove(req->timeout);
++
++	g_free(req);
++}
++
++static void avctp_channel_destroy(struct avctp_channel *chan)
++{
++	g_io_channel_shutdown(chan->io, TRUE, NULL);
++	g_io_channel_unref(chan->io);
++
++	if (chan->watch)
++		g_source_remove(chan->watch);
++
++	if (chan->p)
++		pending_destroy(chan->p, NULL);
++
++	if (chan->process_id > 0)
++		g_source_remove(chan->process_id);
++
++	if (chan->destroy)
++		chan->destroy(chan);
++
++	g_free(chan->buffer);
++	g_queue_foreach(chan->queue, pending_destroy, NULL);
++	g_queue_free(chan->queue);
++	g_slist_foreach(chan->processed, pending_destroy, NULL);
++	g_slist_free(chan->processed);
++	g_slist_free_full(chan->handlers, g_free);
++	g_free(chan);
++}
++
+ static void avctp_disconnected(struct avctp *session)
+ {
+ 	struct avctp_server *server;
+@@ -341,16 +419,12 @@ static void avctp_disconnected(struct avctp *session)
+ 	if (!session)
+ 		return;
+ 
+-	if (session->io) {
+-		g_io_channel_shutdown(session->io, TRUE, NULL);
+-		g_io_channel_unref(session->io);
+-		session->io = NULL;
++	if (session->control) {
++		avctp_channel_destroy(session->control);
+ 	}
+ 	
+ 	if(session->browsing) {
+-		g_io_channel_shutdown(session->browsing, TRUE, NULL);
+-		g_io_channel_unref(session->browsing);
+-		session->browsing = NULL;
++		avctp_channel_destroy(session->browsing);
+ 	}
+ 
+ 	if (session->io_id) {
+@@ -385,8 +459,6 @@ static void avctp_disconnected(struct avctp *session)
+ 
+ 	server = session->server;
+ 	server->sessions = g_slist_remove(server->sessions, session);
+-	g_slist_free_full(session->handlers, g_free);
+-	g_slist_free_full(session->browsing_handlers, g_free);
+ 	g_free(session);
+ }
+ 
+@@ -403,7 +475,7 @@ static void avctp_set_state(struct avctp *session, avctp_state_t new_state)
+ 	}
+ 
+ 	session->state = new_state;
+-
++	session->dev = dev;
+ 	for (l = callbacks; l != NULL; l = l->next) {
+ 		struct avctp_state_callback *cb = l->data;
+ 		cb->cb(dev, old_state, new_state, cb->user_data);
+@@ -440,6 +512,40 @@ static void avctp_set_state(struct avctp *session, avctp_state_t new_state)
+ 	}
+ }
+ 
++static int avctp_browsing_send(struct avctp *session, uint8_t transaction, 
++				uint8_t cr, uint8_t *operands, size_t operand_count)
++{
++	uint8_t *buf;
++	struct avctp_header *avctp;
++	uint8_t *pdu;
++	int sk, err = 0;
++	uint16_t size;
++
++	if (!session->browsing)
++		return -ENOTCONN;
++
++	sk = g_io_channel_unix_get_fd(session->browsing->io);
++	size = AVCTP_HEADER_LENGTH + operand_count;
++	buf = g_malloc0(size);
++
++	avctp = (void *) buf;
++	pdu = (void *) &buf[AVCTP_HEADER_LENGTH];
++
++	avctp->transaction = transaction;
++	avctp->packet_type = AVCTP_PACKET_SINGLE;
++	avctp->cr = cr;
++	avctp->pid = htons(AV_REMOTE_SVCLASS_ID);
++
++	memcpy(pdu, operands, operand_count);
++
++	if (write(sk, buf, size) < 0)
++		err = -errno;
++
++	g_free(buf);
++	DBG("Browsing send with id: %d", transaction);
++	return err;
++}
++
+ static void handle_response(struct avctp *session, struct avctp_header *avctp,
+ 				struct avc_header *avc, uint8_t *operands,
+ 				size_t operand_count)
+@@ -453,7 +559,7 @@ static void handle_response(struct avctp *session, struct avctp_header *avctp,
+ 		return;
+ 	}
+ 	
+-	for (l = session->handlers; l; l = l->next) {
++	for (l = session->control->handlers; l; l = l->next) {
+ 		struct avctp_rsp_handler *handler = l->data;
+ 		
+ 		if (handler->id != avctp->transaction)
+@@ -465,7 +571,7 @@ static void handle_response(struct avctp *session, struct avctp_header *avctp,
+ 					handler->user_data))
+ 				return;
+ 				
+-		session->handlers = g_slist_remove(session->handlers, handler);
++		session->control->handlers = g_slist_remove(session->control->handlers, handler);
+ 		g_free(handler);
+ 			
+ 		return;			
+@@ -485,7 +591,7 @@ static gboolean session_cb(GIOChannel *chan, GIOCondition cond,
+ 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+ 		goto failed;
+ 
+-	sock = g_io_channel_unix_get_fd(session->io);
++	sock = g_io_channel_unix_get_fd(session->control->io);
+ 
+ 	ret = read(sock, buf, sizeof(buf));
+ 	if (ret <= 0)
+@@ -574,33 +680,51 @@ failed:
+ 	return FALSE;
+ }
+ 
+-static void browsing_response(struct avctp *session, struct avctp_header *avctp,
++static void browsing_response(struct avctp_channel *browsing, struct avctp_header *avctp,
+ 				uint8_t *operands, size_t operand_count)
+ {
++	struct avctp_pending_req *p = browsing->p;
++	struct avctp_browsing_req *req;
+ 	GSList *l;
+-	
+-	for (l = session->browsing_handlers; l; l = l->next) {
+-		struct avctp_browsing_rsp_handler *handler = l->data;
+-		
+-		if (handler->id != avctp->transaction)
++
++	if (p && p->transaction == avctp->transaction) {
++		browsing->processed = g_slist_prepend(browsing->processed, p);
++
++		if (p->timeout > 0) {
++			g_source_remove(p->timeout);
++			p->timeout = 0;
++		}
++
++		browsing->p = NULL;
++
++		if (browsing->process_id == 0)
++			browsing->process_id = g_idle_add(process_queue,
++								browsing);
++	}
++
++	for (l = browsing->processed; l; l = l->next) {
++		p = l->data;
++		req = p->data;
++
++		if (p->transaction != avctp->transaction)
+ 			continue;
+ 
+-		if (handler->func && handler->func(session,
+-					operands, operand_count,
+-					handler->user_data))
+-				return;
+-				
+-		session->browsing_handlers = g_slist_remove(session->browsing_handlers, handler);
+-		g_free(handler);
+-			
+-		return;			
++		if (req->func && req->func(browsing->session, operands,
++						operand_count, req->user_data))
++			return;
++
++		browsing->processed = g_slist_remove(browsing->processed, p);
++		pending_destroy(p, NULL);
++
++		return;
+ 	}
+ }
+ 
+ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+ 				gpointer data)
+ {
+-	struct avctp *session = data;
++	struct avctp *session = data;	
++	struct avctp_channel *browsing = session->browsing;
+ 	uint8_t buf[1024], *operands, code, subunit;
+ 	struct avctp_header *avctp;
+ 	struct avc_header *avc;
+@@ -610,7 +734,7 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+ 	if (cond & (G_IO_ERR | G_IO_HUP | G_IO_NVAL))
+ 		goto failed;
+ 
+-	sock = g_io_channel_unix_get_fd(session->browsing);
++	sock = g_io_channel_unix_get_fd(session->browsing->io);
+ 
+ 	ret = read(sock, buf, sizeof(buf));
+ 	if (ret <= 0)
+@@ -634,7 +758,7 @@ static gboolean session_browsing_cb(GIOChannel *chan, GIOCondition cond,
+ 		 * This gets the packet in response to browsing commands that 
+ 		 * originated from here.
+ 		 */
+-		browsing_response(session, avctp, operands, operand_count);
++		browsing_response(browsing, avctp, operands, operand_count);
+ 		return TRUE;
+ 	}
+ 
+@@ -678,11 +802,125 @@ done:
+ 	return TRUE;
+ 
+ failed:
+-	DBG("AVCTP session %p got disconnected", session);
+-	avctp_set_state(session, AVCTP_STATE_DISCONNECTED);
++	DBG("AVCTP Browsing: disconnected");
++	avctp_set_state(session, AVCTP_STATE_CONNECTED);
++	
++	if (session->browsing) {
++		avctp_channel_destroy(session->browsing);
++		session->browsing = NULL;
++	}
++	
+ 	return FALSE;
+ }
+ 
++static struct avctp_channel *avctp_channel_create(struct avctp *session,
++							GIOChannel *io,
++							GDestroyNotify destroy)
++{
++	struct avctp_channel *chan;
++
++	chan = g_new0(struct avctp_channel, 1);
++	chan->session = session;
++	chan->io = g_io_channel_ref(io);
++	chan->queue = g_queue_new();
++	chan->destroy = destroy;
++
++	return chan;
++}
++
++static void handler_free(void *data)
++{
++	struct avctp_browsing_pdu_handler *handler = data;
++
++	if (handler->destroy)
++		handler->destroy(handler->user_data);
++
++	g_free(data);
++}
++
++static void avctp_destroy_browsing(void *data)
++{
++	struct avctp_channel *chan = data;
++
++	g_slist_free_full(chan->handlers, handler_free);
++
++	chan->handlers = NULL;
++}
++
++static void browsing_req_destroy(void *data)
++{
++	struct avctp_browsing_req *req = data;
++	struct avctp_pending_req *p = req->p;
++	struct avctp *session = p->chan->session;
++
++	if (p->err == 0 || req->func == NULL)
++		goto done;
++
++	req->func(session, NULL, 0, req->user_data);
++
++done:
++	g_free(req->operands);
++	g_free(req);
++}
++
++static gboolean req_timeout(gpointer user_data);
++
++static gboolean process_queue(void *user_data)
++{
++	struct avctp_channel *chan = user_data;
++	struct avctp_pending_req *p = chan->p;
++
++	chan->process_id = 0;
++
++	if (p != NULL)
++		return FALSE;
++
++	while ((p = g_queue_pop_head(chan->queue))) {
++
++		if (p->process(p->data) == 0)
++			break;
++
++		pending_destroy(p, NULL);
++	}
++
++	if (p == NULL)
++		return FALSE;
++
++	chan->p = p;
++	p->timeout = g_timeout_add_seconds(2, req_timeout, chan);
++
++	return FALSE;
++
++}
++
++static gboolean req_timeout(gpointer user_data)
++{
++	struct avctp_channel *chan = user_data;
++	struct avctp_pending_req *p = chan->p;
++
++	DBG("transaction %u", p->transaction);
++
++	p->timeout = 0;
++	p->err = -ETIMEDOUT;
++
++	pending_destroy(p, NULL);
++	chan->p = NULL;
++
++	if (chan->process_id == 0)
++		chan->process_id = g_idle_add(process_queue, chan);
++
++	return FALSE;
++}
++
++static int process_browsing(void *data)
++{
++	struct avctp_browsing_req *req = data;
++	struct avctp_pending_req *p = req->p;
++
++	return avctp_browsing_send(p->chan->session, p->transaction, AVCTP_COMMAND,
++					req->operands, req->operand_count);
++}
++
+ static int uinput_create(char *name)
+ {
+ 	struct uinput_dev dev;
+@@ -787,14 +1025,14 @@ static void avctp_connect_cb(GIOChannel *chan, GError *err, gpointer data)
+ 	}
+ 
+ 	DBG("AVCTP: connected to %s", address);
+-
+-	if (!session->io)
+-		session->io = g_io_channel_ref(chan);
++	
++	if (session->control == NULL)
++		session->control = avctp_channel_create(session, chan, NULL);
+ 
+ 	init_uinput(session);
+ 
+ 	avctp_set_state(session, AVCTP_STATE_CONNECTED);
+-	session->mtu = imtu;
++	session->control->mtu = imtu;
+ 	session->io_id = g_io_add_watch(chan,
+ 				G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+ 				(GIOFunc) session_cb, session);
+@@ -803,6 +1041,7 @@ static void avctp_connect_cb(GIOChannel *chan, GError *err, gpointer data)
+ static void avctp_connect_browsing_cb(GIOChannel *chan, GError *err, gpointer data)
+ {
+ 	struct avctp *session = data;
++	struct avctp_channel *browsing = session->browsing;
+ 	char address[18];
+ 	uint16_t imtu;
+ 	GError *gerr = NULL;
+@@ -826,20 +1065,28 @@ static void avctp_connect_browsing_cb(GIOChannel *chan, GError *err, gpointer da
+ 
+ 	DBG("AVCTP Browsing: connected to %s", address);
+ 
+-	if (!session->browsing)
+-		session->browsing = g_io_channel_ref(chan);
++	if (browsing == NULL) {
++		browsing = avctp_channel_create(session, chan,
++						avctp_destroy_browsing);
++		session->browsing = browsing;
++	}
+ 
+ 	avctp_set_state(session, AVCTP_STATE_BROWSING_CONNECTED);
+-	session->mtu_browsing = imtu;
+-	session->browsing_id = g_io_add_watch(chan,
++	session->browsing->mtu = imtu;
++	session->browsing->watch = g_io_add_watch(chan,
+ 				G_IO_IN | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+ 				(GIOFunc) session_browsing_cb, session);
++				
++	/* Process any request that was pending the connection to complete */
++	if (browsing->process_id == 0 && !g_queue_is_empty(browsing->queue))
++		browsing->process_id = g_idle_add(process_queue, browsing);
+ 
+ 	return;
+ fail:
+ 	avctp_set_state(session, AVCTP_STATE_CONNECTED);
+-	if(session->browsing) {
+-		g_io_channel_unref(session->browsing);
++	
++	if (session->browsing) {
++		avctp_channel_destroy(session->browsing);
+ 		session->browsing = NULL;
+ 	}
+ }
+@@ -860,7 +1107,7 @@ static void auth_cb(DBusError *derr, void *user_data)
+ 		return;
+ 	}
+ 
+-	if (!bt_io_accept(session->io, avctp_connect_cb, session,
++	if (!bt_io_accept(session->control->io, avctp_connect_cb, session,
+ 								NULL, &err)) {
+ 		error("bt_io_accept: %s", err->message);
+ 		g_error_free(err);
+@@ -964,13 +1211,13 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
+ 			goto drop;
+ 	}
+ 
+-	if (session->io) {
++	if (session->control) {
+ 		error("Refusing unexpected connect from %s", address);
+ 		goto drop;
+ 	}
+ 
+ 	avctp_set_state(session, AVCTP_STATE_CONNECTING);
+-	session->io = g_io_channel_ref(chan);
++	session->control->io = g_io_channel_ref(chan);
+ 
+ 	if (audio_device_request_authorization(dev, AVRCP_TARGET_UUID,
+ 						auth_cb, session) < 0)
+@@ -981,7 +1228,7 @@ static void avctp_confirm_cb(GIOChannel *chan, gpointer data)
+ 	return;
+ 
+ drop:
+-	if (!session || !session->io)
++	if (!session || !session->control)
+ 		g_io_channel_shutdown(chan, TRUE, NULL);
+ 	if (session)
+ 		avctp_set_state(session, AVCTP_STATE_DISCONNECTED);
+@@ -1088,7 +1335,7 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
+ 	uint8_t *operands = &buf[AVCTP_HEADER_LENGTH + AVC_HEADER_LENGTH];
+ 	int sk;
+ 
+-	if (!session->io)
++	if (!session->control)
+ 		return -ENOTCONN;
+ 
+ 	memset(buf, 0, sizeof(buf));
+@@ -1105,7 +1352,7 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
+ 	operands[0] = op & 0x7f;
+ 	operands[1] = 0;
+ 
+-	sk = g_io_channel_unix_get_fd(session->io);
++	sk = g_io_channel_unix_get_fd(session->control->io);
+ 
+ 	if (write(sk, buf, sizeof(buf)) < 0)
+ 		return -errno;
+@@ -1127,40 +1374,49 @@ int avctp_send_passthrough(struct avctp *session, uint8_t op)
+ 	return 0;
+ }
+ 
+-static int avctp_browsing_send(struct avctp *session, uint8_t transaction, 
+-				uint8_t cr, uint8_t *operands, size_t operand_count)
++static struct avctp_pending_req *pending_create(struct avctp_channel *chan,
++						avctp_process_cb process,
++						void *data,
++						GDestroyNotify destroy)
+ {
+-	uint8_t *buf;
+-	struct avctp_header *avctp;
+-	uint8_t *pdu;
+-	int sk, err = 0;
+-	uint16_t size;
++	struct avctp_pending_req *p;
++	GSList *l, *tmp;
+ 
+-	if (!session->browsing)
+-		return -ENOTCONN;
++	if (!chan->processed)
++		goto done;
+ 
+-	sk = g_io_channel_unix_get_fd(session->browsing);
+-	size = AVCTP_HEADER_LENGTH + operand_count;
+-	buf = g_malloc0(size);
++	tmp = g_slist_copy(chan->processed);
+ 
+-	avctp = (void *) buf;
+-	pdu = (void *) &buf[AVCTP_HEADER_LENGTH];
++	/* Find first unused transaction id */
++	for (l = tmp; l; l = g_slist_next(l)) {
++		struct avctp_pending_req *req = l->data;
+ 
+-	avctp->transaction = transaction;
+-	avctp->packet_type = AVCTP_PACKET_SINGLE;
+-	avctp->cr = cr;
+-	avctp->pid = htons(AV_REMOTE_SVCLASS_ID);
++		if (req->transaction == chan->transaction) {
++			chan->transaction++;
++			chan->transaction %= 16;
++			tmp = g_slist_delete_link(tmp, l);
++			l = tmp;
++		}
++	}
+ 
+-	memcpy(pdu, operands, operand_count);
++	g_slist_free(tmp);
+ 
+-	if (write(sk, buf, size) < 0)
+-		err = -errno;
++done:
++	p = g_new0(struct avctp_pending_req, 1);
++	p->chan = chan;
++	p->transaction = chan->transaction;
++	p->process = process;
++	p->data = data;
++	p->destroy = destroy;
+ 
+-	g_free(buf);
+-	DBG("Browsing send with id: %d", transaction);
+-	return err;
++	chan->transaction++;
++	chan->transaction %= 16;
++
++	return p;
+ }
+ 
++
++
+ static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
+ 				uint8_t code, uint8_t subunit, uint8_t opcode,
+ 				uint8_t *operands, size_t operand_count)
+@@ -1172,10 +1428,10 @@ static int avctp_send(struct avctp *session, uint8_t transaction, uint8_t cr,
+ 	int sk, err = 0;
+ 	uint16_t size;
+ 
+-	if (!session->io)
++	if (!session->control)
+ 		return -ENOTCONN;
+ 
+-	sk = g_io_channel_unix_get_fd(session->io);
++	sk = g_io_channel_unix_get_fd(session->control->io);
+ 	size = AVCTP_HEADER_LENGTH + AVC_HEADER_LENGTH + operand_count;
+ 	buf = g_malloc0(size);
+ 
+@@ -1230,7 +1486,7 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
+ 	handler->func = func;
+ 	handler->user_data = user_data;
+ 
+-	session->handlers = g_slist_prepend(session->handlers, handler);
++	session->control->handlers = g_slist_prepend(session->control->handlers, handler);
+ 	
+ 	id++;
+ 	id %= 16; //transaction id is only 4 bits
+@@ -1243,26 +1499,33 @@ int avctp_send_browsing_req(struct avctp *session,
+ 				uint8_t *operands, size_t operand_count,
+ 				avctp_browsing_rsp_cb func, void *user_data)
+ {
+-	struct avctp_browsing_rsp_handler *handler;
+-	int err;
++	struct avctp_channel *browsing = session->browsing;
++	struct avctp_pending_req *p;
++	struct avctp_browsing_req *req;
+ 
+-	err = avctp_browsing_send(session, id, AVCTP_COMMAND, operands, operand_count);
+-	if (err < 0){
+-		DBG("Browsing send error: %d",err);
+-		return err;
+-	}
++	if (browsing == NULL)
++		return -ENOTCONN;
+ 
+-	handler = g_new0(struct avctp_browsing_rsp_handler, 1);
+-	handler->id = id;
+-	handler->func = func;
+-	handler->user_data = user_data;
++	req = g_new0(struct avctp_browsing_req, 1);
++	req->func = func;
++	req->operands = g_memdup(operands, operand_count);
++	req->operand_count = operand_count;
++	req->user_data = user_data;
+ 
+-	session->browsing_handlers = g_slist_prepend(session->browsing_handlers, handler);
+-	
+-	id++;
+-	id %= 16; //transaction id is only 4 bits
++	p = pending_create(browsing, process_browsing, req,
++			browsing_req_destroy);
++
++	req->p = p;
++
++	g_queue_push_tail(browsing->queue, p);
++
++	/* Connection did not complete, delay process of the request */
++	if (browsing->watch == 0)
++		return 0;
++
++	if (browsing->process_id == 0)
++		browsing->process_id = g_idle_add(process_queue, browsing);
+ 
+-	
+ 	return 0;
+ }
+ 
+@@ -1363,8 +1626,9 @@ struct avctp *avctp_connect(const bdaddr_t *src, const bdaddr_t *dst)
+ 		return NULL;
+ 	}
+ 
++	session->control = avctp_channel_create(session, io, NULL);
+ 	session->initiator = true;
+-	session->io = io;
++	g_io_channel_unref(io);
+ 
+ 	return session;
+ }
+@@ -1394,7 +1658,9 @@ int avctp_connect_browsing(struct avctp *session)
+ 		return -EIO;
+ 	}
+ 	
+-	session->browsing = io;
++	session->browsing = avctp_channel_create(session, io,
++						avctp_destroy_browsing);
++	g_io_channel_unref(io);
+ 	return 0;
+ }
+ 
+@@ -1405,7 +1671,7 @@ bool avctp_is_initiator(struct avctp *session)
+ 
+ void avctp_disconnect(struct avctp *session)
+ {
+-	if (!session->io)
++	if (!session->control)
+ 		return;
+ 
+ 	avctp_set_state(session, AVCTP_STATE_DISCONNECTED);
+@@ -1432,3 +1698,19 @@ guint avctp_get_browsing_id(struct avctp *session)
+ {
+ 	return session->browsing_id;
+ }
++
++struct audio_device * avctp_get_dev(struct avctp * session)
++{
++	if(!session)
++		return NULL;
++		
++	return session->dev;
++}
++
++void avctp_set_dev(struct avctp *session, struct audio_device *dev)
++{
++	if(!session)
++		return;
++		
++	session->dev = dev;
++}
+diff --git a/audio/avctp.h b/audio/avctp.h
+index 2f3150f..6de2326 100644
+--- a/audio/avctp.h
++++ b/audio/avctp.h
+@@ -87,6 +87,10 @@ typedef gboolean (*avctp_rsp_cb) (struct avctp *session, uint8_t code,
+ typedef gboolean (*avctp_browsing_rsp_cb) (struct avctp *session,
+ 					uint8_t *operands, size_t operand_count,
+ 					void *user_data);
++typedef size_t (*avctp_browsing_pdu_cb) (struct avctp *session,
++					uint8_t transaction,
++					uint8_t *operands, size_t operand_count,
++					void *user_data);
+ 
+ unsigned int avctp_add_state_cb(avctp_state_cb cb, void *user_data);
+ gboolean avctp_remove_state_cb(unsigned int id);
+@@ -114,3 +118,5 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
+ const bdaddr_t * avctp_get_dest(struct avctp *session);
+ const bdaddr_t * avctp_get_src(struct avctp *session);
+ guint avctp_get_browsing_id(struct avctp *session);
++struct audio_device * avctp_get_dev(struct avctp * session);
++void avctp_set_dev(struct avctp *session, struct audio_device *dev);
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 2fbf26c..14b22d8 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -235,12 +235,13 @@ static uint32_t company_ids[] = {
+ };
+ 
+ static void register_volume_notification(struct avrcp_player *player);
+-static void avrcp_register_notification(struct control *con, uint8_t event);
++static void avrcp_register_notification(struct avctp *session, uint8_t event);
+ static void avrcp_get_element_attributes(struct avctp *session);
+ static void avrcp_connect_browsing(struct avrcp_server *server);
+ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+ 								uint16_t id);
+ static void avrcp_get_media_player_list(struct avrcp_server *server);
++static void avrcp_get_capabilities(struct avctp *session);
+ 
+ static sdp_record_t *avrcp_ct_record(void)
+ {
+@@ -1318,6 +1319,12 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		break;
+ 	case AVCTP_STATE_CONNECTING:
+ 		DBG("AVRCP Connecting");
++		/*if(!server->session)
++			session = avctp_connect(&dev->src, &dev->dst);			
++		if(session) {
++			server->session = session;
++		}*/
++		
+ 		//avrcp_get_capabilities(dev);
+ /*
+ 		player->session = avctp_connect(&dev->src, &dev->dst);
+@@ -1332,19 +1339,7 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		break;
+ 	case AVCTP_STATE_CONNECTED:
+ 		DBG("AVRCP Connected");
+-			
+-		/* 
+-		 * This callback gets called when the avctp layer gets 
+-		 * connected regardless if the host or device initiated the 
+-		 * connection. This check is to make sure the avrcp server 
+-		 * object's session member is initialized 
+-		 */	
+-		if(!server->session){
+-			session = avctp_connect(&dev->src, &dev->dst);			
+-			if(session) {
+-				server->session = session;
+-			}	
+-		}
++		
+ 		
+ 		rec = btd_device_get_record(dev->btd_dev, AVRCP_TARGET_UUID);
+ 		if (rec == NULL)
+@@ -1354,37 +1349,40 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 			return;
+ 
+ 		desc = list->data;
+-
+-		if (desc && desc->version >= 0x0104){
+-			;
+-			//register_volume_notification(player);
+-		}
+ 				
+ 		data = sdp_data_get(rec, SDP_ATTR_SUPPORTED_FEATURES);
+ 		features = data->val.uint16;
+ 		
+ 		/* Only create player if category 1 is supported */
+-		if (desc && (features & AVRCP_FEATURE_CATEGORY_1)){
+-			player = create_ct_player(server, 0);
+-			if (player == NULL){
+-				sdp_list_free(list, free);
+-				return;
+-			}
+-		}
++		if (!desc || !(features & AVRCP_FEATURE_CATEGORY_1))
++			return;
++		DBG("Category 1 supported");
++		player = create_ct_player(server, 0);
++		if (player == NULL)
++			return;
++		DBG("Player created");
++		if (!desc || desc->version < 0x0103)
++			return;
++		DBG("AVRCP at least 1.3");
++		DBG("Calling get capability");
++		avrcp_get_capabilities(server->session);
++
++		if (!desc || desc->version < 0x0104)
++			return;
++		DBG("AVRCP at least 1.4");
++		if(!desc || !(features & AVRCP_FEATURE_BROWSING))
++			return;
++		DBG("Browsing supported");
++		avrcp_connect_browsing(server);
+ 		
+-		if(desc && (features & AVRCP_FEATURE_BROWSING)){
+-			/* TODO call avrcp_connect_browser here */
+-			/* this expects avrcp struct as parameter */
+-			avrcp_connect_browsing(server);
+-		}
+ 		sdp_list_free(list, free);
++		
+ 		return;
+ 		
+ 	case AVCTP_STATE_BROWSING_CONNECTED:
+ 		if (server->browsing_timer > 0) {
+ 			g_source_remove(server->browsing_timer);
+ 			server->browsing_timer = 0;			
+-			//avctp_connect_browsing(session->conn);
+ 		}
+ 		DBG("AVCTP_STATE_BROWSING_CONNECTED");
+ 		return;
+@@ -1410,7 +1408,9 @@ gboolean avrcp_connect(struct audio_device *dev)
+ 		DBG("Connecting to avrcp failed");
+ 		return FALSE;
+ 	}
+-	
++	DBG("Setting dev: %p", dev);
++	avctp_set_dev(session, dev);
++	server->session = session;
+ 	return TRUE;
+ }
+ 
+@@ -1686,6 +1686,10 @@ static gboolean avrcp_get_play_status_rsp(struct avctp *conn,
+ 	
+ 	server = find_server(servers, avctp_get_src(session));
+ 	player = server->ct_player;
++	
++	if(!player)
++		return FALSE;
++		
+ 	mp = player->user_data;
+ 
+ 	if (pdu == NULL || code == AVC_CTYPE_REJECTED ||
+@@ -1723,19 +1727,27 @@ static void avrcp_get_play_status(struct avctp *session)
+ 					session);
+ }
+ 
+-static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
++static gboolean avrcp_get_capabilities_resp(struct avctp *session,
+ 					uint8_t code, uint8_t subunit,
+ 					uint8_t *operands, size_t operand_count,
+ 					void *user_data)
+ {
+-	struct control *control_ptr = user_data;
+ 	struct avrcp_header *pdu = (void *) operands;
++	struct avrcp_server *server;
+ 	uint16_t events = 0;
+ 	uint8_t count;
+ 
+ 	if (pdu == NULL || pdu->params[0] != CAP_EVENTS_SUPPORTED)
+ 		return FALSE;
+ 	DBG("get capabilities response");
++	
++	/* Connect browsing if pending */
++	server = find_server(servers, avctp_get_src(session));
++	if (server->browsing_timer > 0) {
++		g_source_remove(server->browsing_timer);
++		server->browsing_timer = 0;
++		avctp_connect_browsing(session);
++	}
+ 
+ 	count = pdu->params[1];
+ 
+@@ -1753,7 +1765,7 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
+ 		case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
+ 		//case AVRCP_EVENT_VOLUME_CHANGED:
+ 			DBG("Event Supported: %d", event);
+-			avrcp_register_notification(control_ptr, event);
++			avrcp_register_notification(session, event);
+ 			break;
+ 		}
+ 	}
+@@ -1762,22 +1774,22 @@ static gboolean avrcp_get_capabilities_resp(struct avctp *conn,
+ 	//	avrcp_list_player_attributes(conn);
+ 
+ 	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
+-		avrcp_get_play_status(conn);
++		avrcp_get_play_status(session);
+     
+ 	if (!(events & (1 << AVRCP_EVENT_STATUS_CHANGED)))
+-		avrcp_get_element_attributes(conn);
++		avrcp_get_element_attributes(session);
+ 
+-	return TRUE;
++	return FALSE;
+ }
+  
+-void avrcp_get_capabilities(struct control *con)
++void avrcp_get_capabilities(struct avctp *session)
+ {
+ 	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_GET_CAPABILITIES_PARAM_LENGTH];
+ 	struct avrcp_header *pdu = (void *) buf;
+ 	uint8_t length;
+ 	
+ 
+-	if (con->session == NULL)
++	if (session == NULL)
+ 		return;
+ 
+ 	memset(buf, 0, sizeof(buf));
+@@ -1789,11 +1801,11 @@ void avrcp_get_capabilities(struct control *con)
+ 	pdu->params_len = htons(AVRCP_GET_CAPABILITIES_PARAM_LENGTH);
+ 
+ 	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
+-	DBG("Getting caps for session: %p", con->session);
+-	avctp_send_vendordep_req(con->session, AVC_CTYPE_STATUS,
++	DBG("Getting caps for session: %p", session);
++	avctp_send_vendordep_req(session, AVC_CTYPE_STATUS,
+ 					AVC_SUBUNIT_PANEL, buf, length,
+ 					avrcp_get_capabilities_resp,
+-					con);
++					session);
+ }
+ 
+ static gboolean connect_browsing(gpointer user_data)
+@@ -1818,8 +1830,6 @@ static void avrcp_connect_browsing(struct avrcp_server *server)
+ 		return;
+ 	}
+ 
+-	/* this gets done when this is not the initiator */
+-	/* comment out for now */
+ 	if (server->browsing_timer > 0)
+ 		return;
+ 
+@@ -1922,6 +1932,9 @@ static gboolean avrcp_get_element_attributes_rsp(struct avctp *session,
+ 	
+ 	server = find_server(servers, avctp_get_src(session));
+ 	player = server->ct_player;
++	
++	if(!player)
++	 return FALSE;
+ 
+ 	if (code == AVC_CTYPE_REJECTED)
+ 		return FALSE;
+@@ -2687,6 +2700,7 @@ static const struct media_player_callback ct_cbs = {
+ 	.add_to_nowplaying = ct_add_to_nowplaying,
+ };
+ 
++
+ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+ 								uint16_t id)
+ {
+@@ -2698,10 +2712,10 @@ static struct avrcp_player *create_ct_player(struct avrcp_server *server,
+ 	player = g_new0(struct avrcp_player, 1);
+ 	player->session = server->session;
+ 	player->server = server;
+-
+-	dev = manager_get_device(&server->src, avctp_get_dest(server->session), FALSE);
++	
++	dev = avctp_get_dev(server->session);
+ 	player->dev = dev;
+-
++	
+ 	path = dev->path;
+ 	
+ 	DBG("path: %s", path);
+@@ -2916,7 +2930,12 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
+ 		
+ 	}
+ 	
+-	return TRUE;
++	if (g_slist_find(removed, server->ct_player))
++		server->ct_player = NULL;
++
++	g_slist_free(removed);
++	
++	return FALSE;
+ }
+ 
+ static void avrcp_get_media_player_list(struct avrcp_server *server)
+@@ -3033,7 +3052,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
+ 					uint8_t *operands, size_t operand_count,
+ 					void *user_data)
+ {
+-	struct control *session = user_data;
++	struct avctp *session = user_data;
+ 	struct avrcp_header *pdu = (void *) operands;
+ 	const char *curval, *strval;
+ 	uint8_t event;
+@@ -3066,19 +3085,19 @@ static gboolean avrcp_handle_event(struct avctp *conn,
+ 		//avrcp_volume_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_STATUS_CHANGED:
+-		avrcp_status_changed(conn, pdu);
++		avrcp_status_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_TRACK_CHANGED:
+-		avrcp_track_changed(conn, pdu);
++		avrcp_track_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_SETTINGS_CHANGED:
+ 		//avrcp_setting_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_AVAILABLE_PLAYERS_CHANGED:
+-		avrcp_available_players_changed(conn, pdu);
++		avrcp_available_players_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_ADDRESSED_PLAYER_CHANGED:
+-		avrcp_addressed_player_changed(conn, pdu);
++		avrcp_addressed_player_changed(session, pdu);
+ 		break;
+ 	case AVRCP_EVENT_UIDS_CHANGED:
+ 		//avrcp_uids_changed(session, pdu);
+@@ -3090,7 +3109,7 @@ static gboolean avrcp_handle_event(struct avctp *conn,
+ 	return TRUE;
+ }
+ 
+-static void avrcp_register_notification(struct control *con, uint8_t event)
++static void avrcp_register_notification(struct avctp *session, uint8_t event)
+ {
+ 	uint8_t buf[AVRCP_HEADER_LENGTH + AVRCP_REGISTER_NOTIFICATION_PARAM_LENGTH];
+ 	struct avrcp_header *pdu = (void *) buf;
+@@ -3106,9 +3125,9 @@ static void avrcp_register_notification(struct control *con, uint8_t event)
+ 
+ 	length = AVRCP_HEADER_LENGTH + ntohs(pdu->params_len);
+ 
+-	avctp_send_vendordep_req(con->session, AVC_CTYPE_NOTIFY,
++	avctp_send_vendordep_req(session, AVC_CTYPE_NOTIFY,
+ 					AVC_SUBUNIT_PANEL, buf, length,
+-					avrcp_handle_event, con);
++					avrcp_handle_event, session);
+ }
+ 
+ unsigned int avrcp_add_state_cb(avrcp_state_cb cb, void *user_data)
+diff --git a/audio/avrcp.h b/audio/avrcp.h
+index 9593ad2..bd5a012 100644
+--- a/audio/avrcp.h
++++ b/audio/avrcp.h
+@@ -107,8 +107,6 @@ gboolean avrcp_connect(struct audio_device *dev);
+ void avrcp_disconnect(struct audio_device *dev);
+ int avrcp_set_volume(struct audio_device *dev, uint8_t volume);
+ 
+-void avrcp_get_capabilities(struct control *con);
+-
+ struct avrcp_player *avrcp_register_player(const bdaddr_t *src,
+ 						struct avrcp_player_cb *cb,
+ 						void *user_data,
+diff --git a/audio/control.c b/audio/control.c
+index 1484227..373e457 100644
+--- a/audio/control.c
++++ b/audio/control.c
+@@ -90,7 +90,6 @@ static void state_changed(struct audio_device *dev, avctp_state_t old_state,
+ 		break;
+ 	case AVCTP_STATE_CONNECTED:
+ 		DBG("Control connected");
+-		avrcp_get_capabilities(control);
+ 		value = TRUE;
+ 		g_dbus_emit_signal(dev->conn, dev->path,
+ 				AUDIO_CONTROL_INTERFACE, "Connected",

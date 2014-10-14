@@ -35,4 +35,3 @@ index 1d6d736..6b00d78 100644
  ])
  
  AC_DEFUN([AC_PATH_USB], [
--- 

@@ -1,0 +1,1003 @@
+From: Nathaniel Abalos <ncabalos@truefitness.com>
+Date: Mon, 9 Jun 2014 10:40:25 -0500
+Subject: Made changes to make sure everything would compile
+
+---
+ audio/avctp.c  |   11 ++
+ audio/avctp.h  |    3 +
+ audio/avrcp.c  |  189 +++++++++++++++++++++---
+ gdbus/gdbus.h  |   55 +++++--
+ gdbus/object.c |  444 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 667 insertions(+), 35 deletions(-)
+
+diff --git a/audio/avctp.c b/audio/avctp.c
+index abc04c4..7d07c35 100644
+--- a/audio/avctp.c
++++ b/audio/avctp.c
+@@ -1413,3 +1413,14 @@ struct avctp *avctp_get(const bdaddr_t *src, const bdaddr_t *dst)
+ {
+ 	return avctp_get_internal(src, dst);
+ }
++
++const bdaddr_t * avctp_get_dest(struct avctp *session)
++{
++	return &session->dst;
++}
++
++
++const bdaddr_t * avctp_get_src(struct avctp *session)
++{
++	return &session->server->src;
++}
+diff --git a/audio/avctp.h b/audio/avctp.h
+index 0f0c540..3ef4179 100644
+--- a/audio/avctp.h
++++ b/audio/avctp.h
+@@ -110,3 +110,6 @@ int avctp_send_vendordep_req(struct avctp *session, uint8_t code,
+ 					uint8_t subunit, uint8_t *operands,
+ 					size_t operand_count,
+ 					avctp_rsp_cb func, void *user_data);
++
++const bdaddr_t * avctp_get_dest(struct avctp *session);
++const bdaddr_t * avctp_get_src(struct avctp *session);
+diff --git a/audio/avrcp.c b/audio/avrcp.c
+index 8ca919d..4428883 100644
+--- a/audio/avrcp.c
++++ b/audio/avrcp.c
+@@ -59,6 +59,7 @@
+ #include "sdpd.h"
+ #include "dbus-common.h"
+ #include "control.h"
++#include "player.h"
+ 
+ /* Company IDs for vendor dependent commands */
+ #define IEEEID_BTSIG		0x001958
+@@ -174,8 +175,9 @@ struct avrcp_server {
+ 	uint32_t tg_record_id;
+ 	uint32_t ct_record_id;
+ 	GSList *players;
++	GSList *media_players;
+ 	struct avrcp_player *active_player;
+-	struct avrcp_player *ct_player;
++	struct avrcp_player *ct_player; /* this will be active player now*/
+ 	struct avctp *session;
+ 	unsigned int browsing_timer;
+ };
+@@ -199,12 +201,10 @@ struct avrcp_player {
+ 	struct avrcp_player_cb *cb;
+ 	void *user_data;
+ 	GDestroyNotify destroy;
+-};
+-
+-struct avrcp_media_player {
+ 	uint16_t id;
+ 	bool browsable;
+-}avrcp_media_player;
++	uint8_t *features;
++};
+ 
+ struct avrcp_state_callback {
+ 	avrcp_state_cb cb;
+@@ -1390,6 +1390,18 @@ void avrcp_disconnect(struct audio_device *dev)
+ 
+ 	avctp_disconnect(session);
+ }
++/*
++static struct avrcp_player_cb ct_player_cb = {
++	.get_setting = ct_get_setting,
++	.set_setting = ct_set_setting,
++	.list_metadata = ct_list_metadata,
++	.get_uid = ct_get_uid,
++	.get_metadata = ct_get_metadata,
++	.get_position = ct_get_position,
++	.get_status = ct_get_status,
++	.set_volume = ct_set_volume
++};
++*/
+ 
+ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
+ {
+@@ -1453,6 +1465,7 @@ int avrcp_register(DBusConnection *conn, const bdaddr_t *src, GKeyFile *config)
+ 	
+ 	if(server->ct_record_id){
+ 		DBG("TODO Create controller player");
++		//avrcp_register_player(server->src, &ct_player_cb, server, NULL);
+ 		
+ 	}
+ 	
+@@ -1924,7 +1937,7 @@ static const char *subtype_to_string(uint32_t subtype)
+ 	return "None";
+ }
+ 
+-static void avrcp_player_parse_features(struct avrcp_media_player *player, uint8_t * features)
++static void avrcp_player_parse_features(struct avrcp_player *player, uint8_t * features)
+ {
+ 	if (features[7] & 0x08) {
+ 		DBG("Media player browsable is supported");
+@@ -1940,13 +1953,12 @@ static void avrcp_player_parse_features(struct avrcp_media_player *player, uint8
+ 	}
+ }
+ 
+-static void *parse_media_folder(struct avctp *session,
++static void *parse_media_folder(struct avrcp_server *server,
+ 					uint8_t *operands, uint16_t len)
+ {
+-	//struct avrcp_player *player = session->controller->player;
+-	//struct media_player *mp = player->user_data;
+-	//struct media_item *item;
+-	void * item;
++	struct avrcp_player *player = server->ct_player;
++	struct media_player *mp = player->user_data;
++	struct media_item *item;
+ 	uint16_t namelen;
+ 	char name[255];
+ 	uint64_t uid;
+@@ -1967,7 +1979,9 @@ static void *parse_media_folder(struct avctp *session,
+ 		DBG("Folder item (%08llu): %s",uid, name);
+ 	}
+ 	item = NULL;
+-	//item = media_player_create_folder(mp, name, type, uid);
++	DBG("mp: %p", mp);
++	DBG("uid: %llu", uid);
++	item = media_player_create_folder(mp, name, type, uid);
+ 	if (!item)
+ 		return NULL;
+ 
+@@ -1981,7 +1995,7 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
+ {
+ 	struct avrcp_browsing_header *pdu = (void *) operands;
+ 	struct avctp *session = user_data;
+-	//struct avrcp_player *player = session->controller->player;
++	struct avrcp_server *server;
+ 	//struct pending_list_items *p = player->p;
+ 	uint16_t count;
+ 	uint32_t items, total;
+@@ -2009,6 +2023,12 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
+ 	count = bt_get_be16(&operands[6]);
+ 	if (count == 0)
+ 		goto done;
++		
++	/* get server here */	
++	server = find_server(servers, avctp_get_src(session));
++	if(!server){
++		goto done;
++	}
+ 
+ 	for (i = 8; count && i + 3 < operand_count; count--) {
+ 		struct media_item *item;
+@@ -2033,7 +2053,7 @@ static gboolean avrcp_list_items_rsp(struct avctp *conn, uint8_t *operands,
+ 			DBG("Media element found");
+ 			//item = parse_media_element(session, &operands[i], len);
+ 		else
+-			item = parse_media_folder(session, &operands[i], len);
++			item = parse_media_folder(server, &operands[i], len);
+ 
+ 		//if (item) {
+ 		//	if (g_slist_find(p->items, item))
+@@ -2094,6 +2114,19 @@ static void avrcp_list_items(struct avctp *session, uint32_t start,
+ 					avrcp_list_items_rsp, session);
+ }
+ 
++static const char * avrcp_status_to_str(uint8_t status)
++{
++	switch(status){
++		case AVRCP_STATUS_SUCCESS: return "AVRCP_STATUS_SUCCESS";
++		case AVRCP_STATUS_OUT_OF_BOUNDS: return "AVRCP_STATUS_OUT_OF_BOUNDS";
++		case AVRCP_STATUS_INVALID_PLAYER_ID: return "AVRCP_STATUS_INVALID_PLAYER_ID";	
++		case AVRCP_STATUS_PLAYER_NOT_BROWSABLE: return "AVRCP_STATUS_PLAYER_NOT_BROWSABLE";
++		case AVRCP_STATUS_NO_AVAILABLE_PLAYERS: return "AVRCP_STATUS_NO_AVAILABLE_PLAYERS";
++		case AVRCP_STATUS_ADDRESSED_PLAYER_CHANGED: return "AVRCP_STATUS_ADDRESSED_PLAYER_CHANGED";
++		default: return "Unknown Error";
++	}
++}
++
+ static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
+ 						uint8_t *operands,
+ 						size_t operand_count,
+@@ -2108,8 +2141,10 @@ static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
+ 	char name[255];
+ 
+ 	if (pdu == NULL || pdu->params[0] != AVRCP_STATUS_SUCCESS ||
+-							operand_count < 13)
++							operand_count < 13){
++		DBG("Set Browsed error: %s", avrcp_status_to_str(pdu->params[0]));						
+ 		return FALSE;
++	}
+ 
+ 	DBG("Set Browsed reply received");
+ 	items = bt_get_be32(&pdu->params[3]);
+@@ -2144,7 +2179,7 @@ static gboolean avrcp_set_browsed_player_rsp(struct avctp *conn,
+ }
+ 
+ static void avrcp_set_browsed_player(struct avctp *session,
+-						struct avrcp_media_player *player)
++						struct avrcp_player *player)
+ {
+ 	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 2];
+ 	struct avrcp_browsing_header *pdu = (void *) buf;
+@@ -2161,9 +2196,95 @@ static void avrcp_set_browsed_player(struct avctp *session,
+ 				avrcp_set_browsed_player_rsp, session);
+ }
+ 
+-static void avrcp_parse_media_player_item(struct avrcp_media_player *player, 
++static const struct media_player_callback ct_cbs = {
++/*	.set_setting	= ct_set_setting,
++	.play		= ct_play,
++	.pause		= ct_pause,
++	.stop		= ct_stop,
++	.next		= ct_next,
++	.previous	= ct_previous,
++	.fast_forward	= ct_fast_forward,
++	.rewind		= ct_rewind,
++	.list_items	= ct_list_items,
++	.change_folder	= ct_change_folder,
++	.search		= ct_search,
++	.play_item	= ct_play_item,
++	.add_to_nowplaying = ct_add_to_nowplaying,*/
++	.set_setting	= NULL,
++	.play		= NULL,
++	.pause		= NULL,
++	.stop		= NULL,
++	.next		= NULL,
++	.previous	= NULL,
++	.fast_forward	= NULL,
++	.rewind		= NULL,
++	.list_items	= NULL,
++	.change_folder	= NULL,
++	.search		= NULL,
++	.play_item	= NULL,
++	.add_to_nowplaying = NULL
++};
++
++static struct avrcp_player *create_ct_player(struct avrcp_server *server,
++								uint16_t id)
++{
++	struct avrcp_player *player;
++	struct media_player *mp;
++	struct audio_device *dev;
++	const char *path;
++
++	player = g_new0(struct avrcp_player, 1);
++	//player->sessions = g_slist_prepend(player->sessions, session);
++
++	dev = manager_get_device(&server->src, avctp_get_dest(server->session), FALSE);
++
++	path = dev->path;
++	
++	DBG("path: %s", path);
++
++	mp = media_player_controller_create(path, id);
++	if (mp == NULL)
++		return NULL;
++
++	media_player_set_callbacks(mp, &ct_cbs, player);
++	player->user_data = mp;
++	player->destroy = (GDestroyNotify) media_player_destroy;
++
++	if (server->ct_player == NULL){
++		DBG("Set ct_player: %p", player);
++		server->ct_player = player;
++	}
++
++	server->players = g_slist_prepend(
++						server->players,
++						player);
++
++	return server->ct_player;
++}
++
++static struct avrcp_player *find_ct_player(struct avrcp_server *server, uint16_t id)
++{
++	GSList *l;
++
++	for (l = server->players; l; l = l->next) {
++		struct avrcp_player *player = l->data;
++
++		if (player->id == 0) {
++			player->id = id;
++			return player;
++		}
++
++		if (player->id == id)
++			return player;
++	}
++
++	return NULL;
++}
++
++static struct avrcp_player * avrcp_parse_media_player_item(struct avrcp_server *server, 
+ 						uint8_t *operands, uint16_t len)
+ {
++	struct avrcp_player *player;
+ 	uint16_t id, namelen;
+ 	uint32_t subtype;
+ 	const char *curval, *strval;
+@@ -2177,6 +2298,17 @@ static void avrcp_parse_media_player_item(struct avrcp_media_player *player,
+ 	
+ 	id = bt_get_be16(&operands[0]);
+ 	DBG("Media player ID: %d",id);
++	
++	/* Find media player */
++	player = find_ct_player(server, id);
++	if (player == NULL) {
++		DBG("Creating player");
++		player = create_ct_player(server, id);
++		if (player == NULL)
++			return NULL;
++	} else if (player->features != NULL)
++		return player;
++		
+ 	player->id = id;
+ 	
+ 	DBG("Media player type: %s", type_to_string(operands[2]));
+@@ -2198,6 +2330,8 @@ static void avrcp_parse_media_player_item(struct avrcp_media_player *player,
+ 		name[namelen] = '\0';
+ 		DBG("Media player name: %s", name);
+ 	}
++	
++	return player;
+ }
+ 
+ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn, 
+@@ -2206,7 +2340,8 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
+ 						void *user_data)
+ {
+ 	struct avrcp_browsing_header *pdu = (void *) operands;
+-	struct avctp * session = user_data;
++	struct avrcp_server * server = user_data;
++	struct avrcp_player * player;
+ 	uint16_t count;
+ 	size_t i;
+ 	
+@@ -2235,11 +2370,11 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
+ 		}
+ 		
+ 		DBG("Perform parsing here!");
+-		avrcp_parse_media_player_item(&avrcp_media_player, &operands[i], len);
++		player = avrcp_parse_media_player_item(server, &operands[i], len);
+ 		
+-		if(avrcp_media_player.browsable == true){
++		if(server->ct_player->browsable == true){
+ 			DBG("Set browsed player here");
+-			avrcp_set_browsed_player(conn, &avrcp_media_player);
++			avrcp_set_browsed_player(conn, server->ct_player);
+ 		}
+ 		
+ 		i+= len;
+@@ -2249,7 +2384,7 @@ static gboolean avrcp_get_media_player_list_rsp(struct avctp * conn,
+ 	return TRUE;
+ }
+ 
+-static void avrcp_get_media_player_list(struct avctp *session)
++static void avrcp_get_media_player_list(struct avrcp_server *server)
+ {
+ 	uint8_t buf[AVRCP_BROWSING_HEADER_LENGTH + 10];
+ 	struct avrcp_browsing_header *pdu = (void *) buf;
+@@ -2258,12 +2393,18 @@ static void avrcp_get_media_player_list(struct avctp *session)
+ 	
+ 	pdu->pdu_id = AVRCP_GET_FOLDER_ITEMS;
+ 	pdu->param_len = htons(10);
+-	avctp_send_browsing_req(session,buf, sizeof(buf),avrcp_get_media_player_list_rsp,session);
++	avctp_send_browsing_req(server->session,buf, sizeof(buf),avrcp_get_media_player_list_rsp,server);
+ }
+ 
+ static void avrcp_addressed_player_changed(struct avctp *session)
+ {
+-		avrcp_get_media_player_list(session);
++	struct avrcp_server * server;
++	server = find_server(servers, avctp_get_src(session));
++	
++	if(!server)
++		return;
++	
++	avrcp_get_media_player_list(server);
+ }
+ 					
+ 
+diff --git a/gdbus/gdbus.h b/gdbus/gdbus.h
+index 0a8a27c..4666204 100644
+--- a/gdbus/gdbus.h
++++ b/gdbus/gdbus.h
+@@ -31,6 +31,12 @@ extern "C" {
+ #include <dbus/dbus.h>
+ #include <glib.h>
+ 
++typedef struct GDBusArgInfo GDBusArgInfo;
++typedef struct GDBusMethodTable GDBusMethodTable;
++typedef struct GDBusSignalTable GDBusSignalTable;
++typedef struct GDBusPropertyTable GDBusPropertyTable;
++typedef struct GDBusSecurityTable GDBusSecurityTable;
++
+ typedef void (* GDBusWatchFunction) (DBusConnection *connection,
+ 							void *user_data);
+ 
+@@ -55,6 +61,18 @@ typedef void (* GDBusDestroyFunction) (void *user_data);
+ typedef DBusMessage * (* GDBusMethodFunction) (DBusConnection *connection,
+ 					DBusMessage *message, void *user_data);
+ 
++typedef gboolean (*GDBusPropertyGetter)(const GDBusPropertyTable *property,
++					DBusMessageIter *iter, void *data);
++
++typedef guint32 GDBusPendingPropertySet;
++
++typedef void (*GDBusPropertySetter)(const GDBusPropertyTable *property,
++			DBusMessageIter *value, GDBusPendingPropertySet id,
++			void *data);
++
++typedef gboolean (*GDBusPropertyExists)(const GDBusPropertyTable *property,
++								void *data);
++
+ typedef guint32 GDBusPendingReply;
+ 
+ typedef void (* GDBusSecurityFunction) (DBusConnection *connection,
+@@ -73,7 +91,8 @@ typedef enum {
+ } GDBusSignalFlags;
+ 
+ typedef enum {
+-	G_DBUS_PROPERTY_FLAG_DEPRECATED = (1 << 0),
++	G_DBUS_PROPERTY_FLAG_DEPRECATED   = (1 << 0),
++	G_DBUS_PROPERTY_FLAG_EXPERIMENTAL = (1 << 1),
+ } GDBusPropertyFlags;
+ 
+ typedef enum {
+@@ -82,38 +101,41 @@ typedef enum {
+ 	G_DBUS_SECURITY_FLAG_ALLOW_INTERACTION = (1 << 2),
+ } GDBusSecurityFlags;
+ 
+-typedef struct {
++struct GDBusArgInfo{
+ 	const char *name;
+ 	const char *signature;
+-} GDBusArgInfo;
++};
+ 
+-typedef struct {
++struct GDBusMethodTable{
+ 	const char *name;
+ 	GDBusMethodFunction function;
+ 	GDBusMethodFlags flags;
+ 	unsigned int privilege;
+ 	const GDBusArgInfo *in_args;
+ 	const GDBusArgInfo *out_args;
+-} GDBusMethodTable;
++};
+ 
+-typedef struct {
++struct GDBusSignalTable{
+ 	const char *name;
+ 	GDBusSignalFlags flags;
+ 	const GDBusArgInfo *args;
+-} GDBusSignalTable;
++};
+ 
+-typedef struct {
++struct GDBusPropertyTable{
+ 	const char *name;
+ 	const char *type;
++	GDBusPropertyGetter get;
++	GDBusPropertySetter set;
++	GDBusPropertyExists exists;
+ 	GDBusPropertyFlags flags;
+-} GDBusPropertyTable;
++};
+ 
+-typedef struct {
++struct GDBusSecurityTable{
+ 	unsigned int privilege;
+ 	const char *action;
+ 	GDBusSecurityFlags flags;
+ 	GDBusSecurityFunction function;
+-} GDBusSecurityTable;
++};
+ 
+ #define GDBUS_ARGS(args...) (const GDBusArgInfo[]) { args, { } }
+ 
+@@ -204,6 +226,16 @@ gboolean g_dbus_emit_signal(DBusConnection *connection,
+ gboolean g_dbus_emit_signal_valist(DBusConnection *connection,
+ 				const char *path, const char *interface,
+ 				const char *name, int type, va_list args);
++void g_dbus_pending_property_success(GDBusPendingPropertySet id);
++void g_dbus_pending_property_error_valist(GDBusPendingReply id,
++				const char *name, const char *format, va_list args);
++void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
++				const char *format, ...);
++void g_dbus_emit_property_changed(DBusConnection *connection,
++				const char *path, const char *interface,
++				const char *name);
++gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
++				const char *interface, DBusMessageIter *iter);
+ 
+ guint g_dbus_add_service_watch(DBusConnection *connection, const char *name,
+ 				GDBusWatchFunction connect,
+@@ -217,6 +249,7 @@ guint g_dbus_add_signal_watch(DBusConnection *connection,
+ 				const char *interface, const char *member,
+ 				GDBusSignalFunction function, void *user_data,
+ 				GDBusDestroyFunction destroy);
++				
+ gboolean g_dbus_remove_watch(DBusConnection *connection, guint tag);
+ void g_dbus_remove_all_watches(DBusConnection *connection);
+ 
+diff --git a/gdbus/object.c b/gdbus/object.c
+index 900e7ab..4a50401 100644
+--- a/gdbus/object.c
++++ b/gdbus/object.c
+@@ -37,10 +37,20 @@
+ #define error(fmt...)
+ #define debug(fmt...)
+ 
++#define DBUS_INTERFACE_OBJECT_MANAGER "org.freedesktop.DBus.ObjectManager"
++
+ struct generic_data {
+ 	unsigned int refcount;
++	DBusConnection *conn;
++	char *path;
+ 	GSList *interfaces;
++	GSList *objects;
++	GSList *added;
++	GSList *removed;
++	guint process_id;
++	gboolean pending_prop;
+ 	char *introspect;
++	struct generic_data *parent;
+ };
+ 
+ struct interface_data {
+@@ -48,6 +58,7 @@ struct interface_data {
+ 	const GDBusMethodTable *methods;
+ 	const GDBusSignalTable *signals;
+ 	const GDBusPropertyTable *properties;
++	GSList *pending_prop;
+ 	void *user_data;
+ 	GDBusDestroyFunction destroy;
+ };
+@@ -59,6 +70,15 @@ struct security_data {
+ 	void *iface_user_data;
+ };
+ 
++struct property_data {
++	DBusConnection *conn;
++	GDBusPendingPropertySet id;
++	DBusMessage *message;
++};
++
++static GSList *pending = NULL;
++static struct generic_data *root;
++
+ static void print_arguments(GString *gstr, const GDBusArgInfo *args,
+ 						const char *direction)
+ {
+@@ -389,6 +409,408 @@ static struct interface_data *find_interface(GSList *interfaces,
+ 	return NULL;
+ }
+ 
++static inline const GDBusPropertyTable *find_property(const GDBusPropertyTable *properties,
++							const char *name)
++{
++	const GDBusPropertyTable *p;
++
++	for (p = properties; p && p->name; p++) {
++		if (strcmp(name, p->name) != 0)
++			continue;
++
++		//if (check_experimental(p->flags,
++		//			G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++		//	break;
++
++		return p;
++	}
++
++	return NULL;
++}
++
++static void remove_pending(struct generic_data *data)
++{
++	if (data->process_id > 0) {
++		g_source_remove(data->process_id);
++		data->process_id = 0;
++	}
++
++	pending = g_slist_remove(pending, data);
++}
++
++static void append_property(struct interface_data *iface,
++			const GDBusPropertyTable *p, DBusMessageIter *dict)
++{
++	DBusMessageIter entry, value;
++
++	dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, NULL,
++								&entry);
++	dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &p->name);
++	dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, p->type,
++								&value);
++
++	p->get(p, &value, iface->user_data);
++
++	dbus_message_iter_close_container(&entry, &value);
++	dbus_message_iter_close_container(dict, &entry);
++}
++
++static void append_properties(struct interface_data *data,
++							DBusMessageIter *iter)
++{
++	DBusMessageIter dict;
++	const GDBusPropertyTable *p;
++
++	dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY,
++				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++				DBUS_TYPE_STRING_AS_STRING
++				DBUS_TYPE_VARIANT_AS_STRING
++				DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
++
++	for (p = data->properties; p && p->name; p++) {
++		//if (check_experimental(p->flags,
++		//			G_DBUS_PROPERTY_FLAG_EXPERIMENTAL))
++		//	continue;
++
++		if (p->get == NULL)
++			continue;
++
++		if (p->exists != NULL && !p->exists(p, data->user_data))
++			continue;
++
++		append_property(data, p, &dict);
++	}
++
++	dbus_message_iter_close_container(iter, &dict);
++}
++
++static void append_interface(gpointer data, gpointer user_data)
++{
++	struct interface_data *iface = data;
++	DBusMessageIter *array = user_data;
++	DBusMessageIter entry;
++
++	dbus_message_iter_open_container(array, DBUS_TYPE_DICT_ENTRY, NULL,
++								&entry);
++	dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &iface->name);
++	append_properties(data, &entry);
++	dbus_message_iter_close_container(array, &entry);
++}
++
++static GDBusPendingPropertySet next_pending_property = 1;
++static GSList *pending_property_set;
++
++static struct property_data *remove_pending_property_data(
++						GDBusPendingPropertySet id)
++{
++	struct property_data *propdata;
++	GSList *l;
++
++	for (l = pending_property_set; l != NULL; l = l->next) {
++		propdata = l->data;
++		if (propdata->id != id)
++			continue;
++
++		break;
++	}
++
++	if (l == NULL)
++		return NULL;
++
++	pending_property_set = g_slist_delete_link(pending_property_set, l);
++
++	return propdata;
++}
++
++void g_dbus_pending_property_success(GDBusPendingPropertySet id)
++{
++	struct property_data *propdata;
++
++	propdata = remove_pending_property_data(id);
++	if (propdata == NULL)
++		return;
++
++	g_dbus_send_reply(propdata->conn, propdata->message,
++							DBUS_TYPE_INVALID);
++	dbus_message_unref(propdata->message);
++	g_free(propdata);
++}
++
++gboolean g_dbus_send_error_valist(DBusConnection *connection,
++					DBusMessage *message, const char *name,
++					const char *format, va_list args)
++{
++	DBusMessage *error;
++	char str[1024];
++
++	vsnprintf(str, sizeof(str), format, args);
++
++	error = dbus_message_new_error(message, name, str);
++	if (error == NULL)
++		return FALSE;
++
++	return g_dbus_send_message(connection, error);
++}
++
++void g_dbus_pending_property_error_valist(GDBusPendingReply id,
++					const char *name, const char *format,
++					va_list args)
++{
++	struct property_data *propdata;
++
++	propdata = remove_pending_property_data(id);
++	if (propdata == NULL)
++		return;
++
++	g_dbus_send_error_valist(propdata->conn, propdata->message, name,
++								format, args);
++
++	dbus_message_unref(propdata->message);
++	g_free(propdata);
++}
++
++void g_dbus_pending_property_error(GDBusPendingReply id, const char *name,
++						const char *format, ...)
++{
++	va_list args;
++
++	va_start(args, format);
++
++	g_dbus_pending_property_error_valist(id, name, format, args);
++
++	va_end(args);
++}
++
++static void emit_interfaces_added(struct generic_data *data)
++{
++	DBusMessage *signal;
++	DBusMessageIter iter, array;
++
++	if (root == NULL || data == root)
++		return;
++
++	signal = dbus_message_new_signal(root->path,
++					DBUS_INTERFACE_OBJECT_MANAGER,
++					"InterfacesAdded");
++	if (signal == NULL)
++		return;
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH,
++								&data->path);
++
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++				DBUS_TYPE_STRING_AS_STRING
++				DBUS_TYPE_ARRAY_AS_STRING
++				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++				DBUS_TYPE_STRING_AS_STRING
++				DBUS_TYPE_VARIANT_AS_STRING
++				DBUS_DICT_ENTRY_END_CHAR_AS_STRING
++				DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &array);
++
++	g_slist_foreach(data->added, append_interface, &array);
++	g_slist_free(data->added);
++	data->added = NULL;
++
++	dbus_message_iter_close_container(&iter, &array);
++
++	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
++	dbus_connection_send(data->conn, signal, NULL);
++	dbus_message_unref(signal);
++}
++
++static void append_name(gpointer data, gpointer user_data)
++{
++	char *name = data;
++	DBusMessageIter *iter = user_data;
++
++	dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &name);
++}
++
++static void emit_interfaces_removed(struct generic_data *data)
++{
++	DBusMessage *signal;
++	DBusMessageIter iter, array;
++
++	if (root == NULL || data == root)
++		return;
++
++	signal = dbus_message_new_signal(root->path,
++					DBUS_INTERFACE_OBJECT_MANAGER,
++					"InterfacesRemoved");
++	if (signal == NULL)
++		return;
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH,
++								&data->path);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++					DBUS_TYPE_STRING_AS_STRING, &array);
++
++	g_slist_foreach(data->removed, append_name, &array);
++	g_slist_free_full(data->removed, g_free);
++	data->removed = NULL;
++
++	dbus_message_iter_close_container(&iter, &array);
++
++	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
++	dbus_connection_send(data->conn, signal, NULL);
++	dbus_message_unref(signal);
++}
++
++static void process_properties_from_interface(struct generic_data *data,
++						struct interface_data *iface)
++{
++	GSList *l;
++	DBusMessage *signal;
++	DBusMessageIter iter, dict, array;
++	GSList *invalidated;
++
++	data->pending_prop = FALSE;
++
++	if (iface->pending_prop == NULL)
++		return;
++
++	signal = dbus_message_new_signal(data->path,
++			DBUS_INTERFACE_PROPERTIES, "PropertiesChanged");
++	if (signal == NULL) {
++		error("Unable to allocate new " DBUS_INTERFACE_PROPERTIES
++						".PropertiesChanged signal");
++		return;
++	}
++
++	iface->pending_prop = g_slist_reverse(iface->pending_prop);
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING,	&iface->name);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++			DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
++			DBUS_TYPE_STRING_AS_STRING DBUS_TYPE_VARIANT_AS_STRING
++			DBUS_DICT_ENTRY_END_CHAR_AS_STRING, &dict);
++
++	invalidated = NULL;
++
++	for (l = iface->pending_prop; l != NULL; l = l->next) {
++		GDBusPropertyTable *p = l->data;
++
++		if (p->get == NULL)
++			continue;
++
++		if (p->exists != NULL && !p->exists(p, iface->user_data)) {
++			invalidated = g_slist_prepend(invalidated, p);
++			continue;
++		}
++
++		append_property(iface, p, &dict);
++	}
++
++	dbus_message_iter_close_container(&iter, &dict);
++
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++				DBUS_TYPE_STRING_AS_STRING, &array);
++	for (l = invalidated; l != NULL; l = g_slist_next(l)) {
++		GDBusPropertyTable *p = l->data;
++
++		dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING,
++								&p->name);
++	}
++	g_slist_free(invalidated);
++	dbus_message_iter_close_container(&iter, &array);
++
++	g_slist_free(iface->pending_prop);
++	iface->pending_prop = NULL;
++
++	/* Use dbus_connection_send to avoid recursive calls to g_dbus_flush */
++	dbus_connection_send(data->conn, signal, NULL);
++	dbus_message_unref(signal);
++}
++
++static void process_property_changes(struct generic_data *data)
++{
++	GSList *l;
++
++	for (l = data->interfaces; l != NULL; l = l->next) {
++		struct interface_data *iface = l->data;
++
++		process_properties_from_interface(data, iface);
++	}
++}
++
++static gboolean process_changes(gpointer user_data)
++{
++	struct generic_data *data = user_data;
++
++	remove_pending(data);
++
++	if (data->added != NULL)
++		emit_interfaces_added(data);
++
++	/* Flush pending properties */
++	if (data->pending_prop == TRUE)
++		process_property_changes(data);
++
++	if (data->removed != NULL)
++		emit_interfaces_removed(data);
++
++	data->process_id = 0;
++
++	return FALSE;
++}
++
++static void add_pending(struct generic_data *data)
++{
++	if (data->process_id > 0)
++		return;
++
++	data->process_id = g_idle_add(process_changes, data);
++
++	pending = g_slist_append(pending, data);
++}
++
++void g_dbus_emit_property_changed(DBusConnection *connection,
++				const char *path, const char *interface,
++				const char *name)
++{
++	const GDBusPropertyTable *property;
++	struct generic_data *data;
++	struct interface_data *iface;
++
++	if (path == NULL)
++		return;
++
++	if (!dbus_connection_get_object_path_data(connection, path,
++					(void **) &data) || data == NULL)
++		return;
++
++	iface = find_interface(data->interfaces, interface);
++	if (iface == NULL)
++		return;
++
++	/*
++	 * If ObjectManager is attached, don't emit property changed if
++	 * interface is not yet published
++	 */
++	if (g_slist_find(data->added, iface))
++		return;
++
++	property = find_property(iface->properties, name);
++	if (property == NULL) {
++		error("Could not find property %s in %p", name,
++							iface->properties);
++		return;
++	}
++
++	if (g_slist_find(iface->pending_prop, (void *) property) != NULL)
++		return;
++
++	data->pending_prop = TRUE;
++	iface->pending_prop = g_slist_prepend(iface->pending_prop,
++						(void *) property);
++
++	add_pending(data);
++}
++
+ static gboolean g_dbus_args_have_signature(const GDBusArgInfo *args,
+ 							DBusMessage *message)
+ {
+@@ -856,3 +1278,25 @@ gboolean g_dbus_emit_signal_valist(DBusConnection *connection,
+ 	return emit_signal_valist(connection, path, interface,
+ 							name, type, args);
+ }
++
++gboolean g_dbus_get_properties(DBusConnection *connection, const char *path,
++				const char *interface, DBusMessageIter *iter)
++{
++	struct generic_data *data;
++	struct interface_data *iface;
++
++	if (path == NULL)
++		return FALSE;
++
++	if (!dbus_connection_get_object_path_data(connection, path,
++					(void **) &data) || data == NULL)
++		return FALSE;
++
++	iface = find_interface(data->interfaces, interface);
++	if (iface == NULL)
++		return FALSE;
++
++	append_properties(iface, iter);
++
++	return TRUE;
++}

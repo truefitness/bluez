@@ -37,4 +37,3 @@ index d442d1d..99e03bb 100644
  	.control	= TRUE,
  	.socket		= FALSE,
  	.media		= TRUE,
--- 
