@@ -1,3 +1,11 @@
+bluez (4.101-0ubuntu13.1true1~1.gbp1f679a) UNRELEASED; urgency=medium
+
+  ** SNAPSHOT build @1f679ad9d7f351907ea58f0ac7720a9088265f6f **
+
+  * Import patches from upstream 4.101-0ubuntu13.1
+
+ -- Robert Hedges <hedges@ieee.org>  Wed, 27 May 2015 10:45:02 -0500
+
 bluez (4.101-0ubuntu8b1true9) precise; urgency=low
 
   * 0018-Added-some-browsing-specific-function.patch
