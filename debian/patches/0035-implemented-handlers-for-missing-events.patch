@@ -3,7 +3,7 @@ Date: Tue, 26 Aug 2014 13:10:19 -0500
 Subject: implemented handlers for missing events
 
 ---
- audio/avrcp.c |   30 ++++++++++++++++++++----------
+ audio/avrcp.c | 30 ++++++++++++++++++++----------
  1 file changed, 20 insertions(+), 10 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

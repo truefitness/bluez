@@ -3,11 +3,11 @@ Date: Wed, 27 Aug 2014 16:43:31 -0500
 Subject: fixed crashes and added browsing send pending queue from bluez 5
 
 ---
- audio/avctp.c   |  488 +++++++++++++++++++++++++++++++++++++++++++------------
- audio/avctp.h   |    6 +
- audio/avrcp.c   |  135 ++++++++-------
- audio/avrcp.h   |    2 -
- audio/control.c |    1 -
+ audio/avctp.c   | 488 ++++++++++++++++++++++++++++++++++++++++++++------------
+ audio/avctp.h   |   6 +
+ audio/avrcp.c   | 135 +++++++++-------
+ audio/avrcp.h   |   2 -
+ audio/control.c |   1 -
  5 files changed, 468 insertions(+), 164 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

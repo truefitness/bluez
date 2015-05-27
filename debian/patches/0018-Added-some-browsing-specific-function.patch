@@ -3,10 +3,10 @@ Date: Mon, 2 Jun 2014 13:40:57 -0500
 Subject: Added some browsing specific function
 
 ---
- audio/avctp.c |  263 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- audio/avctp.h |    7 +-
- audio/avrcp.c |   56 +++++++++++-
- src/log.c     |    2 +-
+ audio/avctp.c | 263 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ audio/avctp.h |   7 +-
+ audio/avrcp.c |  56 ++++++++++++-
+ src/log.c     |   2 +-
  4 files changed, 324 insertions(+), 4 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

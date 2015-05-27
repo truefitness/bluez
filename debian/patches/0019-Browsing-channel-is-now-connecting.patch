@@ -3,10 +3,10 @@ Date: Tue, 3 Jun 2014 09:47:24 -0500
 Subject: Browsing channel is now connecting
 
 ---
- audio/avctp.c   |    9 ++++++++-
- audio/avrcp.c   |   47 ++++++++++++++++++++++++++++++++---------------
- audio/control.c |    1 +
- audio/device.c  |    7 ++++++-
+ audio/avctp.c   |  9 ++++++++-
+ audio/avrcp.c   | 47 ++++++++++++++++++++++++++++++++---------------
+ audio/control.c |  1 +
+ audio/device.c  |  7 ++++++-
  4 files changed, 47 insertions(+), 17 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

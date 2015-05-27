@@ -3,8 +3,8 @@ Date: Thu, 29 May 2014 13:35:57 -0500
 Subject: True-volume-control-3859147d82.diff
 
 ---
- audio/control.c |   62 ++++++++++++++++++++++++++++++++++++++++++-------------
- audio/device.c  |    2 +-
+ audio/control.c | 62 ++++++++++++++++++++++++++++++++++++++++++++-------------
+ audio/device.c  |  2 +-
  2 files changed, 49 insertions(+), 15 deletions(-)
 
 diff --git a/audio/control.c b/audio/control.c

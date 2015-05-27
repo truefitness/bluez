@@ -3,7 +3,7 @@ Date: Wed, 4 Jun 2014 09:37:00 -0500
 Subject: Added some missing browsing fixes
 
 ---
- audio/avctp.c |   17 ++++++++++++++---
+ audio/avctp.c | 17 ++++++++++++++---
  1 file changed, 14 insertions(+), 3 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

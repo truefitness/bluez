@@ -3,7 +3,7 @@ Date: Thu, 21 Aug 2014 16:30:35 -0500
 Subject: removed experimental flags from media folder properties
 
 ---
- audio/player.c |    6 ++----
+ audio/player.c | 6 ++----
  1 file changed, 2 insertions(+), 4 deletions(-)
 
 diff --git a/audio/player.c b/audio/player.c

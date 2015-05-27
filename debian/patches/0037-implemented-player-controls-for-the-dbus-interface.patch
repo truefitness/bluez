@@ -3,10 +3,10 @@ Date: Tue, 26 Aug 2014 13:42:09 -0500
 Subject: implemented player controls for the dbus interface
 
 ---
- audio/avctp.c   |    2 +-
- audio/avctp.h   |    2 +-
- audio/avrcp.c   |   61 ++++++++++++++++++++++++++++++++++++++++++++++++++-----
- audio/control.c |    2 +-
+ audio/avctp.c   |  2 +-
+ audio/avctp.h   |  2 +-
+ audio/avrcp.c   | 61 ++++++++++++++++++++++++++++++++++++++++++++++++++++-----
+ audio/control.c |  2 +-
  4 files changed, 59 insertions(+), 8 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

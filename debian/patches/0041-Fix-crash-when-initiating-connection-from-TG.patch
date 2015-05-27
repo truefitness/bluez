@@ -3,8 +3,8 @@ Date: Tue, 16 Sep 2014 14:08:37 -0500
 Subject: Fix crash when initiating connection from TG
 
 ---
- audio/avctp.c |    2 +-
- audio/avrcp.c |    4 ++--
+ audio/avctp.c | 2 +-
+ audio/avrcp.c | 4 ++--
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

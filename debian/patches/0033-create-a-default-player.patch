@@ -3,7 +3,7 @@ Date: Mon, 25 Aug 2014 15:18:28 -0500
 Subject: create a default player
 
 ---
- audio/avrcp.c |   15 +++++++++++++++
+ audio/avrcp.c | 15 +++++++++++++++
  1 file changed, 15 insertions(+)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

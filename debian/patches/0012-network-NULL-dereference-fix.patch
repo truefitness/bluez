@@ -4,7 +4,7 @@ Subject: network: NULL dereference fix
 
 Variable ifindex dereferenced on line 242 before null check on line 249.
 ---
- network/common.c |    4 +++-
+ network/common.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/network/common.c b/network/common.c

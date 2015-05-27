@@ -4,8 +4,8 @@ Subject: Browsing channel gets connected regardless if host or device
  initiates the connection
 
 ---
- audio/avctp.c |    1 -
- audio/avrcp.c |   75 ++++++++++++++++++++++++++++++---------------------------
+ audio/avctp.c |  1 -
+ audio/avrcp.c | 75 +++++++++++++++++++++++++++++++----------------------------
  2 files changed, 40 insertions(+), 36 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

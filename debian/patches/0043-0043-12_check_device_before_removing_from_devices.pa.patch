@@ -1,0 +1,27 @@
+From: Robert Hedges <hedges@ieee.org>
+Date: Wed, 27 May 2015 10:18:42 -0500
+Subject: 0043-12_check_device_before_removing_from_devices.patch
+
+---
+ audio/unix.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/audio/unix.c b/audio/unix.c
+index 9a10764..32acac2 100644
+--- a/audio/unix.c
++++ b/audio/unix.c
+@@ -1761,9 +1761,11 @@ static gboolean client_cb(GIOChannel *chan, GIOCondition cond, gpointer data)
+ 	return TRUE;
+ 
+ failed:
+-	clients = g_slist_remove(clients, client);
+-	start_close(client->dev, client, FALSE);
+-	client_free(client);
++	if (g_slist_index(clients, client) != -1) {
++		clients = g_slist_remove(clients, client);
++		start_close(client->dev, client, FALSE);
++		client_free(client);
++	}
+ 	return FALSE;
+ }
+ 

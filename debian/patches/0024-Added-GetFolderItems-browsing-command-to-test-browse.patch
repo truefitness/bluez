@@ -3,7 +3,7 @@ Date: Wed, 4 Jun 2014 14:35:01 -0500
 Subject: Added GetFolderItems browsing command to test browser channel
 
 ---
- audio/avrcp.c |  178 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ audio/avrcp.c | 178 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
  1 file changed, 176 insertions(+), 2 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

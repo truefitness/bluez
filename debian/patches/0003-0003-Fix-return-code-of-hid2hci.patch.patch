@@ -4,7 +4,7 @@ Subject: 0003-Fix-return-code-of-hid2hci.patch
 
 Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=626975
 ---
- tools/hid2hci.c |   10 ++++++++--
+ tools/hid2hci.c | 10 ++++++++--
  1 file changed, 8 insertions(+), 2 deletions(-)
 
 diff --git a/tools/hid2hci.c b/tools/hid2hci.c

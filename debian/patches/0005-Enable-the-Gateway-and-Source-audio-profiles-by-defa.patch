@@ -4,8 +4,8 @@ Subject: Enable the Gateway and Source audio profiles by default.
 
 Those can be disabled by the user in /etc/bluetooth/audio.conf if necessary.
 ---
- audio/a2dp.c    |    2 +-
- audio/manager.c |    4 ++--
+ audio/a2dp.c    | 2 +-
+ audio/manager.c | 4 ++--
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/audio/a2dp.c b/audio/a2dp.c

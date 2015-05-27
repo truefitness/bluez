@@ -5,7 +5,7 @@ Subject: 0001-lower_sink_ranking.patch
 Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
 Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=571595
 ---
- audio/gsta2dpsink.c |    2 +-
+ audio/gsta2dpsink.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/audio/gsta2dpsink.c b/audio/gsta2dpsink.c

@@ -6,7 +6,7 @@ Without this patch, bluez fails to compile when building using GCC 4.7; for
 test-rebuild-20111222.
 See also https://launchpadlibrarian.net/88149127/buildlog_ubuntu-precise-i386.bluez_4.96-3ubuntu4_FAILEDTOBUILD.txt.gz
 ---
- sbc/sbc_primitives_mmx.c |    2 +-
+ sbc/sbc_primitives_mmx.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/sbc/sbc_primitives_mmx.c b/sbc/sbc_primitives_mmx.c
