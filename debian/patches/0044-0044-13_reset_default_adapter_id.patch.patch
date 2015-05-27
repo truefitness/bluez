@@ -1,0 +1,24 @@
+From: Robert Hedges <hedges@ieee.org>
+Date: Wed, 27 May 2015 10:19:07 -0500
+Subject: 0044-13_reset_default_adapter_id.patch
+
+---
+ src/manager.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/manager.c b/src/manager.c
+index 7061f64..79d0047 100644
+--- a/src/manager.c
++++ b/src/manager.c
+@@ -305,8 +305,10 @@ static void manager_remove_adapter(struct btd_adapter *adapter)
+ 	adapter_remove(adapter);
+ 	btd_adapter_unref(adapter);
+ 
+-	if (adapters == NULL)
++	if (adapters == NULL) {
++		default_adapter_id = -1;
+ 		btd_start_exit_timer();
++	}
+ }
+ 
+ void manager_cleanup(DBusConnection *conn, const char *path)

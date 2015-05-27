@@ -3,7 +3,7 @@ Date: Tue, 1 May 2012 15:49:22 +0100
 Subject: 09_fix_ftbfs_with_c99.patch
 
 ---
- lib/bluetooth.h |    8 ++++----
+ lib/bluetooth.h | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/lib/bluetooth.h b/lib/bluetooth.h

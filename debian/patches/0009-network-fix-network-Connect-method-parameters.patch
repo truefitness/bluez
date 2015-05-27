@@ -3,7 +3,7 @@ Date: Sat, 30 Jun 2012 00:39:05 -0300
 Subject: network: fix network Connect() method parameters
 
 ---
- network/connection.c |    4 +++-
+ network/connection.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/network/connection.c b/network/connection.c

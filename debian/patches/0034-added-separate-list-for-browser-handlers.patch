@@ -3,7 +3,7 @@ Date: Tue, 26 Aug 2014 13:09:20 -0500
 Subject: added separate list for browser handlers
 
 ---
- audio/avctp.c |    8 +++++---
+ audio/avctp.c | 8 +++++---
  1 file changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

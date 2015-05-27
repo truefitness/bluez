@@ -10,7 +10,7 @@ For the same reason the code path when acting as client now add the
 watch as soon as the connection completes instead when both channels
 are connected.
 ---
- input/device.c |   31 ++++++++++++++++++++++++-------
+ input/device.c | 31 ++++++++++++++++++++++++-------
  1 file changed, 24 insertions(+), 7 deletions(-)
 
 diff --git a/input/device.c b/input/device.c

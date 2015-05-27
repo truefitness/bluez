@@ -5,8 +5,8 @@ Subject: Please install ALSA plugin in the multiarch directory
 Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
 Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=634976
 ---
- Makefile.am  |    2 +-
- acinclude.m4 |    2 ++
+ Makefile.am  | 2 +-
+ acinclude.m4 | 2 ++
  2 files changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/Makefile.am b/Makefile.am

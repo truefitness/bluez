@@ -3,7 +3,7 @@ Date: Mon, 25 Aug 2014 14:09:48 -0500
 Subject: make sure pointers are not null before proceeding
 
 ---
- audio/avrcp.c |   27 +++++++++++++++++++--------
+ audio/avrcp.c | 27 +++++++++++++++++++--------
  1 file changed, 19 insertions(+), 8 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

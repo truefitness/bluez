@@ -3,8 +3,8 @@ Date: Thu, 5 Jun 2014 13:47:16 -0500
 Subject: Added flow to retrieve root list from device
 
 ---
- audio/avrcp.c   |  272 +++++++++++++++++++++++++++++++++++++++++++++++++++++--
- lib/bluetooth.h |    6 ++
+ audio/avrcp.c   | 272 ++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ lib/bluetooth.h |   6 ++
  2 files changed, 271 insertions(+), 7 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

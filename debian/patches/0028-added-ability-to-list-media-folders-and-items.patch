@@ -3,9 +3,9 @@ Date: Wed, 6 Aug 2014 15:04:26 -0500
 Subject: added ability to list media folders and items
 
 ---
- audio/avrcp.c   |  316 ++++++++++++++++++++++++++++++++++++++++++++++++-------
- audio/player.c  |   23 ++--
- lib/bluetooth.h |   10 ++
+ audio/avrcp.c   | 316 +++++++++++++++++++++++++++++++++++++++++++++++++-------
+ audio/player.c  |  23 ++---
+ lib/bluetooth.h |  10 ++
  3 files changed, 298 insertions(+), 51 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

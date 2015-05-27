@@ -3,11 +3,11 @@ Date: Mon, 9 Jun 2014 10:40:25 -0500
 Subject: Made changes to make sure everything would compile
 
 ---
- audio/avctp.c  |   11 ++
- audio/avctp.h  |    3 +
- audio/avrcp.c  |  189 +++++++++++++++++++++---
- gdbus/gdbus.h  |   55 +++++--
- gdbus/object.c |  444 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ audio/avctp.c  |  11 ++
+ audio/avctp.h  |   3 +
+ audio/avrcp.c  | 189 ++++++++++++++++++++----
+ gdbus/gdbus.h  |  55 +++++--
+ gdbus/object.c | 444 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 667 insertions(+), 35 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

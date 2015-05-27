@@ -3,7 +3,7 @@ Date: Thu, 29 May 2014 13:35:57 -0500
 Subject: True-Updated-control-api.txt-file.patch
 
 ---
- doc/control-api.txt |   24 ++++++++++++++++++++++++
+ doc/control-api.txt | 24 ++++++++++++++++++++++++
  1 file changed, 24 insertions(+)
 
 diff --git a/doc/control-api.txt b/doc/control-api.txt

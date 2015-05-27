@@ -3,13 +3,13 @@ Date: Mon, 10 Feb 2014 13:35:57 -0500
 Subject: True-Bluetooth-metadata
 
 ---
- audio/avctp.c   |   50 ++++--
- audio/avctp.h   |    1 +
- audio/avrcp.c   |  471 +++++++++++++++++++++++++++++++++++++++++++++++++++----
- audio/avrcp.h   |   26 ++-
- audio/control.c |   40 ++++-
- audio/control.h |    7 +
- lib/sdp.h       |    1 +
+ audio/avctp.c   |  50 ++++--
+ audio/avctp.h   |   1 +
+ audio/avrcp.c   | 471 ++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ audio/avrcp.h   |  26 +++-
+ audio/control.c |  40 ++++-
+ audio/control.h |   7 +
+ lib/sdp.h       |   1 +
  7 files changed, 540 insertions(+), 56 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

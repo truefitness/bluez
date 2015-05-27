@@ -3,7 +3,7 @@ Date: Tue, 26 Aug 2014 13:10:56 -0500
 Subject: copied code from bluez5
 
 ---
- audio/avrcp.c |    8 ++++----
+ audio/avrcp.c | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/audio/avrcp.c b/audio/avrcp.c

@@ -4,10 +4,10 @@ Subject: made some progress with dbus and shutting down and restarting
  without crashing
 
 ---
- audio/avctp.c  |    6 +
- audio/avctp.h  |    1 +
- audio/avrcp.c  |  472 ++++++++++++++++++++++++++++++++++++++++++++------------
- audio/player.c |   44 ++----
+ audio/avctp.c  |   6 +
+ audio/avctp.h  |   1 +
+ audio/avrcp.c  | 472 +++++++++++++++++++++++++++++++++++++++++++++------------
+ audio/player.c |  44 ++----
  4 files changed, 399 insertions(+), 124 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c

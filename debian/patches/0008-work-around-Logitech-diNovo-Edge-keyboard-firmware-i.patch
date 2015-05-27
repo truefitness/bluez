@@ -3,7 +3,7 @@ Date: Fri, 27 Jul 2012 14:28:05 +1200
 Subject: work around Logitech diNovo Edge keyboard firmware issue
 
 ---
- scripts/bluetooth-hid2hci.rules |    5 ++++-
+ scripts/bluetooth-hid2hci.rules | 5 ++++-
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/scripts/bluetooth-hid2hci.rules b/scripts/bluetooth-hid2hci.rules

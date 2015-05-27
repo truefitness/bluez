@@ -39,3 +39,7 @@
 0039-backport-added-some-code-from-bluez.patch
 0040-Remove-media.-backups.patch
 0041-Fix-crash-when-initiating-connection-from-TG.patch
+0042-0042-telephony_ofono_add_watch.patch.patch
+0043-0043-12_check_device_before_removing_from_devices.pa.patch
+0044-0044-13_reset_default_adapter_id.patch.patch
+0045-0045-ssp_parameter.patch.patch

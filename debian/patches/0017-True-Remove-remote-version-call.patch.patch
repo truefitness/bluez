@@ -3,7 +3,7 @@ Date: Sat, 26 Apr 2014 13:35:57 -0500
 Subject: True-Remove-remote-version-call.patch
 
 ---
- plugins/hciops.c |    8 ++++----
+ plugins/hciops.c | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/plugins/hciops.c b/plugins/hciops.c

@@ -8,9 +8,9 @@ Updated by Michael Biebl <biebl@debian.org>
 Updated by Nobuhiro Iwamatsu <iwamatsu@debian.org>
 Debian BTS: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=599023
 ---
- audio/telephony-maemo5.c |    9 ++++++++-
- audio/telephony-maemo6.c |   10 +++++++++-
- audio/telephony-ofono.c  |    5 ++++-
+ audio/telephony-maemo5.c |  9 ++++++++-
+ audio/telephony-maemo6.c | 10 +++++++++-
+ audio/telephony-ofono.c  |  5 ++++-
  3 files changed, 21 insertions(+), 3 deletions(-)
 
 diff --git a/audio/telephony-maemo5.c b/audio/telephony-maemo5.c

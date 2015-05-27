@@ -7,7 +7,7 @@ related to AG profile happens, the connection is rejected because HF is
 not connected. One consequence is pulseaudio failing to load bluetooth
 module.
 ---
- audio/main.c |    9 +++++++--
+ audio/main.c | 9 +++++++--
  1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/audio/main.c b/audio/main.c

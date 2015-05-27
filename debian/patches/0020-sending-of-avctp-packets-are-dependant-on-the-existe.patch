@@ -4,7 +4,7 @@ Subject: sending of avctp packets are dependant on the existence of the
  corresponding channel
 
 ---
- audio/avctp.c |    6 +++---
+ audio/avctp.c | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/audio/avctp.c b/audio/avctp.c
