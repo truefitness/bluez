@@ -43,3 +43,6 @@
 0043-0043-12_check_device_before_removing_from_devices.pa.patch
 0044-0044-13_reset_default_adapter_id.patch.patch
 0045-0045-ssp_parameter.patch.patch
+CVE-2016-7837.patch
+CVE-2017-1000250.patch
+

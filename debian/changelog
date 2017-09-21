@@ -1,3 +1,10 @@
+bluez (4.101-0ubuntu13.3true1) UNRELEASED; urgency=medium
+
+  * Import CVE-2016-7837 (buffer overflow) patch
+  * Import CVE-2017-1000250 (blueborne) patch
+
+ -- Robert Hedges <rhedges@truefitness.com>  Thu, 21 Sep 2017 13:23:35 -0500
+
 bluez (4.101-0ubuntu13.1true1) trusty; urgency=medium
 
   * Import patches from upstream 4.101-0ubuntu13.1
